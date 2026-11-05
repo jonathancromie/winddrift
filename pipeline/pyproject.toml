@@ -1,0 +1,26 @@
+[tool.uv]
+package = false
+
+[project]
+name = "winddrift-pipeline"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "cfgrib>=0.9.15.1",
+    "eccodes>=2.50.0",
+    "herbie-data>=2026.10.0",
+    "numpy>=2.5.4",
+    "pillow>=13.0.0",
+    "pyproj>=3.8.0",
+    "scipy>=1.18.1",
+    "xarray>=2026.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

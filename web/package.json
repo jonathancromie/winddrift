@@ -1,0 +1,20 @@
+{
+  "name": "winddrift-web",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.7",
+    "vitest": "^5.1.0"
+  },
+  "type": "module",
+  "private": true
+}

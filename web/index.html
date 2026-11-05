@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1016" />
+    <title>WindDrift</title>
+    <meta name="description" content="Watch wind move across the map, from recent days through the forecast." />
+  </head>
+  <body>
+    <div id="map"></div>
+    <header class="brand">
+      <h1>WindDrift</h1>
+      <p id="source">10 m wind</p>
+    </header>
+    <div id="stats" hidden></div>
+    <div id="notice" role="alert" hidden></div>
+    <section class="timeline" aria-label="Time controls">
+      <button id="play" type="button" aria-label="Play">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path id="play-icon" d="M4 2.5v11l9-5.5z" fill="currentColor" /></svg>
+      </button>
+      <div class="timeline-main">
+        <div class="timeline-labels">
+          <output id="time-label" for="time">&nbsp;</output>
+          <span id="status" aria-live="polite"></span>
+        </div>
+        <input id="time" type="range" min="0" max="1" value="0" step="60000" aria-label="Time" />
+      </div>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

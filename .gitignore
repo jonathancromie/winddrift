@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+*.pyc
+node_modules/
+dist/
+.DS_Store
+.data/
+*.idx
+*.grib2
+web/public/data/
