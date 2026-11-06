@@ -5,13 +5,16 @@ import "./styles.css";
 import type { FrameGrid } from "./data/frame";
 import type { WorkerResponse } from "./data/frame.worker";
 import { FrameStore, type FrameLoader } from "./data/frameStore";
-import { nestWeight, prepareFrames, type Manifest, type TimedFrame } from "./data/manifest";
+import { coarsen, nestWeight, prepareFrames, type Manifest, type TimedFrame } from "./data/manifest";
 import { ParticleLayer, type WindTextures } from "./render/particleLayer";
 import {
   advance,
   framesToRequest,
+  HOUR_MS,
   pairToDisplay,
   phaseAt,
+  SPEEDS,
+  stepTime,
   timelineFraction,
 } from "./timeline/playback";
 
@@ -22,7 +25,7 @@ const BASEMAP = "https://tiles.openfreemap.org/styles/dark";
 const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 const TEXTURE_CAPACITY = 16;
 const CSS_PIXELS_PER_PARTICLE = 30;
-const HOUR_MS = 3600 * 1000;
+const LONG_STEP_MS = 3 * HOUR_MS;
 const NEST_FADE_MS = 3 * HOUR_MS;
 const NOW_REFRESH_MS = 60 * 1000;
 const PLAY_ICON = "M4 2.5v11l9-5.5z";
@@ -126,6 +129,16 @@ async function start(): Promise<void> {
   const playButton = element<HTMLButtonElement>("play");
   const playIcon = element("play-icon");
   const nowButton = element<HTMLButtonElement>("now");
+  const speedGroup = element("speeds");
+  const speedButtons = SPEEDS.map((option, i) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = option.label;
+    button.setAttribute("aria-label", `${option.multiplier} times speed`);
+    button.setAttribute("aria-pressed", String(i === 0));
+    speedGroup.append(button);
+    return button;
+  });
 
   const firstMs = Math.min(baseFrames[0].timeMs, nestFrames[0].timeMs);
   const lastMs = Math.max(baseFrames[baseFrames.length - 1].timeMs, nestFrames[nestFrames.length - 1].timeMs);
@@ -137,6 +150,7 @@ async function start(): Promise<void> {
   const clamp = (timeMs: number) => Math.min(Math.max(timeMs, firstMs), lastMs);
   let timeMs = clamp(Date.now());
   let playing = false;
+  let speed = SPEEDS[0];
   let lastTick = 0;
   let failed = false;
   let nestMask: WebGLTexture | null = null;
@@ -165,16 +179,21 @@ async function start(): Promise<void> {
     nestMask = layer.createMaskTexture(grid, mask);
   });
 
+  /** While playing fast, use wider-spaced frames. Paused views always use every frame. */
+  function activeFrames(frames: TimedFrame[]): TimedFrame[] {
+    return playing && speed.strideHours > 1 ? coarsen(frames, speed.strideHours) : frames;
+  }
+
   /** Regional frames show only when exact, because coarse wind beats wind from the wrong time. */
   function currentWind(): { wind: WindTextures | null; ready: boolean; nested: boolean } {
-    const base = pairToDisplay(baseFrames, timeMs, baseStore);
+    const base = pairToDisplay(activeFrames(baseFrames), timeMs, baseStore);
     if (!base) return { wind: null, ready: false, nested: false };
     const a = baseStore.get(base.a)!;
     const b = baseStore.get(base.b)!;
     const wind: WindTextures = { a: a.resource, b: b.resource, mix: base.mix, grid: a.grid };
 
     const weight = nestWeight(nestFrames, timeMs, NEST_FADE_MS);
-    const pair = weight > 0 ? pairToDisplay(nestFrames, timeMs, nestStore) : null;
+    const pair = weight > 0 ? pairToDisplay(activeFrames(nestFrames), timeMs, nestStore) : null;
     if (pair?.exact && nestMask) {
       const nestA = nestStore.get(pair.a)!;
       const nestB = nestStore.get(pair.b)!;
@@ -200,9 +219,10 @@ async function start(): Promise<void> {
   }
 
   function applyTime(): void {
-    baseStore.request(framesToRequest(baseFrames, timeMs));
+    const lookahead = playing ? speed.lookahead : SPEEDS[0].lookahead;
+    baseStore.request(framesToRequest(activeFrames(baseFrames), timeMs, lookahead));
     const weight = nestWeight(nestFrames, timeMs, NEST_FADE_MS);
-    nestStore.request(weight > 0 ? framesToRequest(nestFrames, timeMs) : []);
+    nestStore.request(weight > 0 ? framesToRequest(activeFrames(nestFrames), timeMs, lookahead) : []);
 
     const { wind, ready, nested } = currentWind();
     if (wind) layer.setWind(wind);
@@ -227,13 +247,29 @@ async function start(): Promise<void> {
       lastTick = performance.now();
       requestAnimationFrame(tick);
     }
+    // Pausing or starting can change which frames are in use.
+    applyTime();
+  }
+
+  function setSpeed(next: (typeof SPEEDS)[number]): void {
+    speed = next;
+    speedButtons.forEach((button, i) => {
+      button.setAttribute("aria-pressed", String(SPEEDS[i] === next));
+    });
+    applyTime();
+  }
+
+  function step(direction: 1 | -1, long: boolean): void {
+    setPlaying(false);
+    timeMs = stepTime(timeMs, direction, long ? LONG_STEP_MS : HOUR_MS, firstMs, lastMs);
+    applyTime();
   }
 
   function tick(now: number): void {
     if (!playing) return;
     const seconds = Math.min((now - lastTick) / 1000, 0.1);
     lastTick = now;
-    const result = advance(timeMs, lastMs, seconds, 1, currentWind().ready);
+    const result = advance(timeMs, lastMs, seconds, speed.multiplier, currentWind().ready);
     timeMs = result.timeMs;
     applyTime();
     if (result.ended) setPlaying(false);
@@ -249,10 +285,12 @@ async function start(): Promise<void> {
     const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
     if (!direction) return;
     event.preventDefault();
-    timeMs = clamp(timeMs + direction * HOUR_MS);
-    applyTime();
+    step(direction as 1 | -1, event.shiftKey);
   });
   playButton.addEventListener("click", () => setPlaying(!playing));
+  element("step-back").addEventListener("click", (event) => step(-1, event.shiftKey));
+  element("step-forward").addEventListener("click", (event) => step(1, event.shiftKey));
+  speedButtons.forEach((button, i) => button.addEventListener("click", () => setSpeed(SPEEDS[i])));
   nowButton.addEventListener("click", () => {
     setPlaying(false);
     timeMs = clamp(Date.now());

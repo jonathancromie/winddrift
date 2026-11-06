@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { prepareFrames } from "../data/manifest";
+import { coarsen, prepareFrames } from "../data/manifest";
 import {
   advance,
   framesToRequest,
+  HOUR_MS as HOUR,
   MODEL_MS_PER_SECOND,
   pairToDisplay,
   phaseAt,
+  SPEEDS,
+  stepTime,
   timelineFraction,
   type ReadyCheck,
 } from "./playback";
 
-const HOUR = 3600 * 1000;
 const frames = prepareFrames(
   [0, 3, 6, 9, 12].map((h) => ({
     time: `2026-11-05T${String(h).padStart(2, "0")}:00:00Z`,
@@ -69,6 +71,78 @@ describe("advance", () => {
 
   it("stops exactly at the end", () => {
     expect(advance(start + 11.9 * HOUR, end, 60, 1, true)).toEqual({ timeMs: end, ended: true });
+  });
+});
+
+describe("coarse frame lists", () => {
+  const hourly = prepareFrames(
+    Array.from({ length: 13 }, (_, h) => ({
+      time: `2026-11-05T${String(h).padStart(2, "0")}:00:00Z`,
+      url: `f${h}`,
+      bytes: 1,
+    })),
+  );
+  const coarse = coarsen(hourly, 3);
+  const base = hourly[0].timeMs;
+
+  it("requests full-list positions, skipping the frames in between", () => {
+    expect(framesToRequest(coarse, base + HOUR, 2)).toEqual([0, 3, 6, 9]);
+  });
+
+  it("loads further ahead when asked", () => {
+    expect(framesToRequest(hourly, base, 4)).toEqual([0, 1, 2, 3, 4]);
+    expect(framesToRequest(hourly, base + 0.5 * HOUR, 3)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("interpolates across the wider gap using full-list positions", () => {
+    expect(pairToDisplay(coarse, base + 4.5 * HOUR, readySet(3, 6))).toEqual({
+      a: 3,
+      b: 6,
+      mix: 0.5,
+      exact: true,
+    });
+  });
+
+  it("doesn't need the skipped frames to be loaded", () => {
+    expect(pairToDisplay(coarse, base + 4 * HOUR, readySet(3, 6))?.exact).toBe(true);
+    expect(pairToDisplay(hourly, base + 4.5 * HOUR, readySet(3, 6))?.exact).toBe(false);
+  });
+});
+
+describe("SPEEDS", () => {
+  it("offers the three speeds in order", () => {
+    expect(SPEEDS.map((s) => s.multiplier)).toEqual([1, 5, 24]);
+  });
+
+  it("looks ahead by at least about two seconds at each speed on hourly frames or its stride", () => {
+    for (const speed of SPEEDS) {
+      const framesPerSecond = (speed.multiplier * MODEL_MS_PER_SECOND) / (speed.strideHours * HOUR);
+      expect(speed.lookahead / framesPerSecond).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe("stepTime", () => {
+  const range = [start, start + 12 * HOUR] as const;
+
+  it("moves one step from a whole hour", () => {
+    expect(stepTime(start + 3 * HOUR, 1, HOUR, ...range)).toBe(start + 4 * HOUR);
+    expect(stepTime(start + 3 * HOUR, -1, HOUR, ...range)).toBe(start + 2 * HOUR);
+  });
+
+  it("snaps to the next whole hour from part way through one", () => {
+    expect(stepTime(start + 3.4 * HOUR, 1, HOUR, ...range)).toBe(start + 4 * HOUR);
+    expect(stepTime(start + 3.4 * HOUR, -1, HOUR, ...range)).toBe(start + 3 * HOUR);
+  });
+
+  it("uses clock multiples of a three-hour step", () => {
+    expect(stepTime(start + 4 * HOUR, 1, 3 * HOUR, ...range)).toBe(start + 6 * HOUR);
+    expect(stepTime(start + 4 * HOUR, -1, 3 * HOUR, ...range)).toBe(start + 3 * HOUR);
+  });
+
+  it("stops at both ends", () => {
+    expect(stepTime(start, -1, HOUR, ...range)).toBe(start);
+    expect(stepTime(start + 12 * HOUR, 1, HOUR, ...range)).toBe(start + 12 * HOUR);
   });
 });
 

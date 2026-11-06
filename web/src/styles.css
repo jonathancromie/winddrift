@@ -85,8 +85,8 @@ body {
   bottom: 28px;
   left: 16px;
   display: flex;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
+  gap: 6px;
   max-width: 880px;
   margin: 0 auto;
   padding: 10px 14px;
@@ -96,7 +96,55 @@ body {
   backdrop-filter: blur(10px);
 }
 
-#play {
+.timeline-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.transport {
+  display: flex;
+  gap: 4px;
+}
+
+.speeds {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.speeds button {
+  min-width: 44px;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.speeds button:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.speeds button[aria-pressed="true"] {
+  background: rgb(255 255 255 / 16%);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.speeds button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.control {
   flex: none;
   display: grid;
   place-items: center;
@@ -109,11 +157,11 @@ body {
   cursor: pointer;
 }
 
-#play:hover {
+.control:hover {
   background: rgb(255 255 255 / 8%);
 }
 
-#play:focus-visible,
+.control:focus-visible,
 #time:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -271,4 +319,57 @@ body {
 
 .maplibregl-ctrl-attrib {
   font-size: 11px;
+}
+
+/* The map credits wrap on narrow screens, and they must stay readable. */
+@media (max-width: 640px) {
+  .brand {
+    max-width: calc(100vw - 72px);
+  }
+
+  .timeline {
+    right: 8px;
+    bottom: 76px;
+    left: 8px;
+  }
+
+  .control {
+    width: 38px;
+    height: 38px;
+  }
+
+  .speeds button {
+    min-width: 38px;
+    min-height: 36px;
+    padding: 0 4px;
+  }
+
+  #now {
+    min-height: 38px;
+    padding: 0 10px;
+  }
+}
+
+/* Keeps all the controls on one row on the smallest phones. */
+@media (max-width: 340px) {
+  .timeline {
+    padding: 10px;
+  }
+
+  .timeline-controls {
+    gap: 4px;
+  }
+
+  .transport {
+    gap: 2px;
+  }
+
+  .control {
+    width: 36px;
+    height: 36px;
+  }
+
+  .speeds button {
+    min-width: 34px;
+  }
 }

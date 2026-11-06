@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framePairAt, nestWeight, prepareFrames } from "./manifest";
+import { coarsen, framePairAt, nestWeight, prepareFrames } from "./manifest";
 
 const frames = prepareFrames([
   { time: "2026-11-05T06:00:00Z", url: "c", bytes: 1 },
@@ -16,6 +16,28 @@ describe("prepareFrames", () => {
 
   it("rejects an empty list", () => {
     expect(() => prepareFrames([])).toThrow();
+  });
+});
+
+describe("coarsen", () => {
+  const hourly = prepareFrames(
+    [1, 2, 3, 4, 5, 6, 7, 8].map((h) => ({
+      time: `2026-11-05T${String(h).padStart(2, "0")}:00:00Z`,
+      url: `f${h}`,
+      bytes: 1,
+    })),
+  );
+
+  it("keeps whole multiples of the step and both ends", () => {
+    expect(coarsen(hourly, 3).map((f) => f.url)).toEqual(["f1", "f3", "f6", "f8"]);
+  });
+
+  it("keeps each frame's position in the full list", () => {
+    expect(coarsen(hourly, 3).map((f) => f.index)).toEqual([0, 2, 5, 7]);
+  });
+
+  it("leaves frames that are already on the step unchanged", () => {
+    expect(coarsen(frames, 1)).toEqual(frames);
   });
 });
 

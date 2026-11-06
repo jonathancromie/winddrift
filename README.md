@@ -2,7 +2,7 @@
 
 Animated wind particles over a map, with a timeline running from recent days through the forecast.
 
-Status: running locally, with HRRR over the US blended into global GFS. Tracers, playback speeds and public hosting aren't built yet.
+Status: running locally, with HRRR over the US blended into global GFS. Tracers and public hosting aren't built yet.
 
 ## Run it
 

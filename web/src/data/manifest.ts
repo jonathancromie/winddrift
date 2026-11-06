@@ -11,6 +11,8 @@ export interface Manifest {
 
 export interface TimedFrame extends ManifestFrame {
   timeMs: number;
+  /** Position in the model's full frame list, which also survives in coarser lists. */
+  index: number;
 }
 
 export interface FramePair {
@@ -23,7 +25,15 @@ export function prepareFrames(frames: ManifestFrame[]): TimedFrame[] {
   if (frames.length === 0) throw new Error("Manifest has no frames");
   return frames
     .map((frame) => ({ ...frame, timeMs: Date.parse(frame.time) }))
-    .sort((x, y) => x.timeMs - y.timeMs);
+    .sort((x, y) => x.timeMs - y.timeMs)
+    .map((frame, index) => ({ ...frame, index }));
+}
+
+/** Keep only frames on a whole multiple of `hours`, plus both ends so the range stays the same. */
+export function coarsen(frames: TimedFrame[], hours: number): TimedFrame[] {
+  const stepMs = hours * 3600 * 1000;
+  const last = frames.length - 1;
+  return frames.filter((frame, i) => i === 0 || i === last || frame.timeMs % stepMs === 0);
 }
 
 /**

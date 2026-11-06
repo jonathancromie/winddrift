@@ -16,9 +16,6 @@
     <div id="stats" hidden></div>
     <div id="notice" role="alert" hidden></div>
     <section class="timeline" aria-label="Time controls">
-      <button id="play" type="button" aria-label="Play">
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path id="play-icon" d="M4 2.5v11l9-5.5z" fill="currentColor" /></svg>
-      </button>
       <div class="timeline-main">
         <div class="timeline-labels">
           <span class="timeline-current">
@@ -36,7 +33,21 @@
           <span id="range-end"></span>
         </div>
       </div>
-      <button id="now" type="button">Now</button>
+      <div class="timeline-controls">
+        <div class="transport">
+          <button id="step-back" class="control" type="button" aria-label="Back one hour" title="Back one hour (Shift: three hours)">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 2.5h2v11H3zM13 2.5v11L6 8z" fill="currentColor" /></svg>
+          </button>
+          <button id="play" class="control" type="button" aria-label="Play">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path id="play-icon" d="M4 2.5v11l9-5.5z" fill="currentColor" /></svg>
+          </button>
+          <button id="step-forward" class="control" type="button" aria-label="Forward one hour" title="Forward one hour (Shift: three hours)">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M11 2.5h2v11h-2zM3 2.5v11L10 8z" fill="currentColor" /></svg>
+          </button>
+        </div>
+        <div id="speeds" class="speeds" role="group" aria-label="Playback speed"></div>
+        <button id="now" type="button">Now</button>
+      </div>
     </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
