@@ -33,13 +33,14 @@ const times = (hours: number[], prefix: string) =>
 function fieldFor(
   base: [number[], (h: number) => DecodedFrame],
   nest: [number[], (h: number) => DecodedFrame],
+  nestFadeMs?: number,
 ) {
   const loaded: string[] = [];
   const hourOf = (frame: TimedFrame) => frame.timeMs / HOUR;
   const field = new WindField(times(base[0], "g"), times(nest[0], "h"), async (frame) => {
     loaded.push(frame.url);
     return frame.url.startsWith("h") ? nest[1](hourOf(frame)) : base[1](hourOf(frame));
-  });
+  }, nestFadeMs);
   return { field, loaded };
 }
 
@@ -116,6 +117,18 @@ describe("WindField", () => {
     expect(field.sample(0, 0, 22.5 * HOUR)[0]).toBeCloseTo(5, 2);
     await field.prepare(30 * HOUR, 30 * HOUR);
     expect(field.sample(0, 0, 30 * HOUR)[0]).toBeCloseTo(0, 2);
+  });
+
+  it("uses the regional model right to both ends of a replay, which has no fade", async () => {
+    const { field } = fieldFor(
+      [[0, 24], () => uniform(GLOBAL, 0, 0)],
+      [[0, 24], () => uniform(NEST, 10, 0)],
+      0,
+    );
+    await field.prepare(0, 0);
+    expect(field.sample(0, 0, 0)[0]).toBeCloseTo(10, 2);
+    await field.prepare(24 * HOUR, 24 * HOUR);
+    expect(field.sample(0, 0, 24 * HOUR)[0]).toBeCloseTo(10, 2);
   });
 
   it("keeps only the frames around the current time", async () => {

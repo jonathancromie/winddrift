@@ -26,9 +26,9 @@ interface WorkerContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-const MANIFEST_KEY = "manifest.json";
 /** Only keys the pipeline writes, so nothing else in the bucket can be reached. */
-const FRAME_KEY = /^(gfs|hrrr)\/\d{10}\/f\d{3}\.wdf$/;
+const FRAME_KEY = /^(views\/[a-z0-9-]{1,40}\/)?(gfs|hrrr)\/\d{10}\/f\d{3}\.wdf$/;
+const LISTING_KEY = /^(manifest\.json|views\/index\.json|views\/[a-z0-9-]{1,40}\/manifest\.json)$/;
 const DATA_PREFIX = "/data/";
 
 const FRAME_CACHE = "public, max-age=31536000, immutable";
@@ -38,7 +38,7 @@ const MANIFEST_CACHE = "public, max-age=300";
 export function keyForPath(pathname: string): string | null {
   if (!pathname.startsWith(DATA_PREFIX)) return null;
   const key = pathname.slice(DATA_PREFIX.length);
-  return key === MANIFEST_KEY || FRAME_KEY.test(key) ? key : null;
+  return LISTING_KEY.test(key) || FRAME_KEY.test(key) ? key : null;
 }
 
 function plainResponse(status: number, message: string, headers: Record<string, string> = {}): Response {
@@ -69,9 +69,10 @@ export async function handleRequest(
   const object = await env.WIND_DATA.get(key);
   if (!object) return plainResponse(404, "Not found");
 
+  const isListing = LISTING_KEY.test(key);
   const headers = {
-    "content-type": key === MANIFEST_KEY ? "application/json" : "application/octet-stream",
-    "cache-control": key === MANIFEST_KEY ? MANIFEST_CACHE : FRAME_CACHE,
+    "content-type": isListing ? "application/json" : "application/octet-stream",
+    "cache-control": isListing ? MANIFEST_CACHE : FRAME_CACHE,
     "content-length": String(object.size),
     etag: object.httpEtag,
     "x-content-type-options": "nosniff",

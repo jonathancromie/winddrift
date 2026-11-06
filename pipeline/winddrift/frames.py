@@ -4,8 +4,10 @@ The past comes from the short-range start of each older run, which is the closes
 model gets to what actually happened. The future comes from one recent long run.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+
+from .regrid import LatLonGrid
 
 
 @dataclass(frozen=True)
@@ -13,6 +15,10 @@ class FrameSpec:
     model: str
     cycle: datetime
     fxx: int
+    # Where the frame is stored within the data, for frames that belong to one view.
+    prefix: str = ""
+    # A finer regional grid than the default, used by close-up views.
+    grid: LatLonGrid | None = field(default=None, compare=False)
 
     @property
     def valid(self) -> datetime:
@@ -20,7 +26,28 @@ class FrameSpec:
 
     @property
     def relative_path(self) -> str:
-        return f"{self.model}/{self.cycle:%Y%m%d%H}/f{self.fxx:03d}.wdf"
+        return f"{self.prefix}{self.model}/{self.cycle:%Y%m%d%H}/f{self.fxx:03d}.wdf"
+
+
+def plan_past_hrrr(
+    start: datetime, end: datetime, prefix: str = "", grid: LatLonGrid | None = None
+) -> list[FrameSpec]:
+    """Hourly frames for a fixed span in the past, each the start of that hour's run."""
+    count = int((end - start).total_seconds() // 3600) + 1
+    return [FrameSpec("hrrr", start + timedelta(hours=i), 0, prefix, grid) for i in range(count)]
+
+
+def plan_past_gfs(start: datetime, end: datetime, prefix: str = "") -> list[FrameSpec]:
+    """3-hourly frames for a fixed span in the past, widened to cover both ends."""
+    first = start.replace(hour=start.hour - start.hour % 3, minute=0, second=0, microsecond=0)
+    specs = []
+    valid = first
+    while True:
+        offset = valid.hour % 6
+        specs.append(FrameSpec("gfs", valid - timedelta(hours=offset), offset, prefix))
+        if valid >= end:
+            return specs
+        valid += timedelta(hours=3)
 
 
 def plan_hrrr(long_cycle: datetime, past_days: int, forecast_hours: int) -> list[FrameSpec]:

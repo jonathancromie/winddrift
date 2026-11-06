@@ -48,6 +48,7 @@ export class WindField {
     private readonly base: TimedFrame[],
     private readonly nest: TimedFrame[],
     private readonly load: FrameLoad,
+    private readonly nestFadeMs: number = NEST_FADE_MS,
   ) {}
 
   /** Load what's needed for a span of time, and let go of everything else. */
@@ -63,7 +64,7 @@ export class WindField {
     addPairs(this.base);
     const nestStart = this.nest[0].timeMs;
     const nestEnd = this.nest[this.nest.length - 1].timeMs;
-    if (startMs < nestEnd && endMs > nestStart) addPairs(this.nest);
+    if (startMs <= nestEnd && endMs >= nestStart) addPairs(this.nest);
 
     for (const frame of this.frames.keys()) {
       if (!needed.has(frame)) this.frames.delete(frame);
@@ -83,7 +84,7 @@ export class WindField {
   /** Wind in m/s at a place and time. The time must lie in the last prepared span. */
   sample(lon: number, lat: number, timeMs: number): [number, number] {
     const [baseU, baseV] = this.sampleModel(this.base, lon, lat, timeMs);
-    const weight = nestWeight(this.nest, timeMs, NEST_FADE_MS);
+    const weight = nestWeight(this.nest, timeMs, this.nestFadeMs);
     if (weight === 0 || !this.mask) return [baseU, baseV];
 
     const { a } = framePairAt(this.nest, timeMs);

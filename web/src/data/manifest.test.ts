@@ -60,6 +60,15 @@ describe("nestWeight", () => {
   it("is full strength in the middle", () => {
     expect(weight("2026-11-05T03:30:00Z")).toBe(1);
   });
+
+  it("doesn't fade at all when replays ask for no fade, even at the exact ends", () => {
+    const noFade = (time: string) => nestWeight(frames, Date.parse(time), 0);
+    expect(noFade("2026-11-05T00:00:00Z")).toBe(1);
+    expect(noFade("2026-11-05T00:30:00Z")).toBe(1);
+    expect(noFade("2026-11-05T07:00:00Z")).toBe(1);
+    expect(noFade("2026-11-04T23:59:00Z")).toBe(0);
+    expect(noFade("2026-11-05T07:01:00Z")).toBe(0);
+  });
 });
 
 describe("framePairAt", () => {

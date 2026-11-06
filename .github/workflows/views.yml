@@ -1,0 +1,37 @@
+name: Publish showcase views
+
+# Views are fixed replays that never change, so they only need publishing by hand when a view
+# is added or edited. Finished frames are skipped, so rerunning is cheap.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: One view's id, or blank for all
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: views
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - name: Publish views
+        run: uv run python -m winddrift.views --r2 --workers 4 ${ONLY:+--only "$ONLY"}
+        env:
+          ONLY: ${{ inputs.only }}
+          R2_BUCKET: winddrift-data
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

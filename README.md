@@ -24,6 +24,8 @@ npm run dev
 
 Add `?debug` to the URL to show the frame rate and particle count, and `&particles=100000` to force a particle count.
 
+For the showcase events and sea breeze loops, also run `uv run python -m winddrift.views` from `pipeline/` (about 440 MB).
+
 ## Tests
 
 ```sh
@@ -47,8 +49,9 @@ One Cloudflare Worker serves the site as static files and streams `/data/*` from
 
 - `.github/workflows/deploy.yml` tests every push and pull request, and deploys from `main`.
 - `.github/workflows/ingest.yml` publishes new frames four times a day. Run it by hand to choose how many days of history to keep.
+- `.github/workflows/views.yml` publishes the showcase views in `pipeline/winddrift/views.py`. Run it by hand after adding or editing a view.
 
-Both need these GitHub Actions secrets:
+They need these GitHub Actions secrets:
 
 | Secret | What it is |
 |---|---|

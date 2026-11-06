@@ -14,6 +14,8 @@ import {
 
 const STATE_FLOATS = 4;
 const PIXELS_PER_SECOND_PER_MS = 2.2;
+/** How long particles move to draw a still picture: long enough to build their trails. */
+const STILL_REDRAW_MS = 2500;
 
 type Uniforms = Record<string, WebGLUniformLocation | null>;
 
@@ -67,6 +69,8 @@ export class ParticleLayer implements CustomLayerInterface {
   private wind: WindTextures | null = null;
   private frame = 0;
   private lastTime = 0;
+  private still = false;
+  private awakeUntil = 0;
 
   /** How many particles the device can sustain, separate from how many look good. */
   private readonly budget: ParticleBudget;
@@ -85,7 +89,23 @@ export class ParticleLayer implements CustomLayerInterface {
 
   setWind(wind: WindTextures | null): void {
     this.wind = wind;
+    this.wake();
+  }
+
+  /** Hold a still picture of the wind instead of animating continuously. */
+  setStill(still: boolean): void {
+    this.still = still;
+    this.wake();
+  }
+
+  /** Let particles move for a moment, to redraw the picture after a change. */
+  wake(): void {
+    this.awakeUntil = performance.now() + STILL_REDRAW_MS;
     this.map?.triggerRepaint();
+  }
+
+  private isResting(): boolean {
+    return this.still && performance.now() > this.awakeUntil;
   }
 
   /** Copy a frame to the GPU. Half-float data is ready to upload without conversion. */
@@ -157,7 +177,7 @@ export class ParticleLayer implements CustomLayerInterface {
   }
 
   prerender(gl: WebGLRenderingContext | WebGL2RenderingContext, args: CustomRenderMethodInput): void {
-    if (!this.wind) return;
+    if (!this.wind || this.isResting()) return;
     const gl2 = gl as WebGL2RenderingContext;
     const now = performance.now();
     const elapsedMs = this.lastTime ? now - this.lastTime : 16;
@@ -193,7 +213,7 @@ export class ParticleLayer implements CustomLayerInterface {
     gl2.bindVertexArray(this.emptyVao);
     gl2.drawArrays(gl2.TRIANGLES, 0, 3);
     gl2.bindVertexArray(null);
-    this.map.triggerRepaint();
+    if (!this.isResting()) this.map.triggerRepaint();
   }
 
   private createState(): StateBuffer {

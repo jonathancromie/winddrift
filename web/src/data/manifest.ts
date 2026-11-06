@@ -4,9 +4,30 @@ export interface ManifestFrame {
   bytes: number;
 }
 
+/** Details of a showcase view: a replay of an event, or a looping day. */
+export interface ViewDetails {
+  id: string;
+  title: string;
+  group: string;
+  summary: string;
+  center: [number, number];
+  zoom: number;
+  timeZone: string;
+  loop: boolean;
+  night: boolean;
+  opensAt?: string;
+  tracer?: { lon: number; lat: number; time: string };
+  maxBounds?: [[number, number], [number, number]];
+}
+
+export interface ViewsIndex {
+  views: { id: string; title: string; group: string }[];
+}
+
 export interface Manifest {
   generated: string;
   models: Record<string, { cycle: string; frames: ManifestFrame[] }>;
+  view?: ViewDetails;
 }
 
 export interface TimedFrame extends ManifestFrame {
@@ -46,6 +67,8 @@ export function coarsen(frames: TimedFrame[], hours: number): TimedFrame[] {
 export function nestWeight(frames: TimedFrame[], timeMs: number, fadeMs: number): number {
   const fromStart = timeMs - frames[0].timeMs;
   const toEnd = frames[frames.length - 1].timeMs - timeMs;
+  // A replay has regional wind for its whole range, so it has no need to fade.
+  if (fadeMs <= 0) return fromStart >= 0 && toEnd >= 0 ? 1 : 0;
   return Math.max(0, Math.min(1, fromStart / fadeMs, toEnd / fadeMs));
 }
 

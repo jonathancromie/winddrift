@@ -30,6 +30,8 @@ export class TracerController {
   readonly layer = new TracerLayer();
   /** Hours and frames for the last finished run, for debugging. */
   lastRun: { ms: number; loads: number } | null = null;
+  /** Called when a tracer is released or cleared. */
+  onChange: () => void = () => {};
 
   private readonly worker = new Worker(new URL("./tracer.worker.ts", import.meta.url), { type: "module" });
   private readonly panel = document.getElementById("tracer")!;
@@ -58,6 +60,7 @@ export class TracerController {
     private readonly nestFrames: TimedFrame[],
     private readonly lastMs: number,
     private readonly formatTime: (timeMs: number) => string,
+    private readonly nestFadeMs: number,
   ) {
     this.worker.onmessage = (event: MessageEvent<TracerResponse>) => this.handle(event.data);
     this.worker.onerror = (event) => {
@@ -136,9 +139,26 @@ export class TracerController {
     this.start();
   }
 
-  private setPreset(name: PresetName): void {
+  /** Release a tracer from a saved place, time and kind, such as a shared link. */
+  restore(lon: number, lat: number, startMs: number, preset: PresetName): void {
+    this.markPreset(preset);
+    this.release = { lon, lat, startMs };
+    this.start();
+  }
+
+  /** What a link needs to bring this tracer back. */
+  get shareState(): { lon: number; lat: number; timeMs: number; preset: PresetName } | undefined {
+    if (!this.release) return undefined;
+    return { lon: this.release.lon, lat: this.release.lat, timeMs: this.release.startMs, preset: this.preset };
+  }
+
+  private markPreset(name: PresetName): void {
     this.preset = name;
     this.presetButtons.forEach((button, key) => button.setAttribute("aria-pressed", String(key === name)));
+  }
+
+  private setPreset(name: PresetName): void {
+    this.markPreset(name);
     // The same release again, so the two kinds can be compared directly.
     if (this.release) this.start();
     else this.updatePanel();
@@ -166,10 +186,12 @@ export class TracerController {
       dataUrl: this.dataUrl,
       baseFrames: this.baseFrames,
       nestFrames: this.nestFrames,
+      nestFadeMs: this.nestFadeMs,
     };
     this.worker.postMessage(request);
     this.updatePath();
     this.updatePanel();
+    this.onChange();
   }
 
   private cancelRun(): void {
@@ -190,6 +212,7 @@ export class TracerController {
     this.layer.setPlume(null, PRESETS[this.preset].color);
     this.updatePath();
     this.updatePanel();
+    this.onChange();
   }
 
   private fail(): void {

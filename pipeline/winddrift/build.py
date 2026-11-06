@@ -33,6 +33,7 @@ GRIB_DIR = REPO / ".data" / "grib"
 GFS_FORECAST_HOURS = 240
 HRRR_FORECAST_HOURS = 48
 RETRY_DELAYS_SECONDS = (0, 10, 60)
+VIEWS_PREFIX = "views/"
 
 
 @dataclass
@@ -67,7 +68,7 @@ def encode_spec(spec: FrameSpec, grib_dir: Path) -> bytes:
     path = fetch_subset(spec.model, spec.cycle, spec.fxx, grib_dir)
     try:
         raw = read_wind(path)
-        field = hrrr_to_field(raw, HRRR_GRID) if spec.model == "hrrr" else gfs_to_field(raw)
+        field = hrrr_to_field(raw, spec.grid or HRRR_GRID) if spec.model == "hrrr" else gfs_to_field(raw)
         return encode_frame(field)
     finally:
         # Also removes a damaged download, so a retry fetches it afresh.
@@ -110,8 +111,12 @@ def manifest_urls(manifest_bytes: bytes | None) -> set[str]:
 
 
 def stale_keys(existing: set[str], current: set[str], previous: set[str]) -> list[str]:
-    """Frames listed by neither manifest. Only frames are ever chosen for deletion."""
-    return sorted(key for key in existing if key.endswith(".wdf") and key not in current | previous)
+    """Timeline frames listed by neither manifest. Showcase views are kept permanently."""
+    return sorted(
+        key
+        for key in existing
+        if key.endswith(".wdf") and not key.startswith(VIEWS_PREFIX) and key not in current | previous
+    )
 
 
 def build_manifest(
@@ -139,6 +144,9 @@ def publish(
     grib_dir: Path,
     now: datetime,
     workers: int,
+    manifest_key: str = MANIFEST_KEY,
+    extra: dict | None = None,
+    prune: bool = True,
 ) -> int:
     """Upload missing frames, then the manifest, then remove old frames. Returns failures."""
     store.check_access()
@@ -159,12 +167,12 @@ def publish(
                     print(f"{done}/{count}", flush=True)
 
     # The manifest goes last, so it never lists a frame that isn't there yet.
-    manifest = build_manifest(long_cycles, results, now)
-    previous = manifest_urls(store.get(MANIFEST_KEY))
-    store.put(MANIFEST_KEY, json.dumps(manifest, indent=1).encode(), MANIFEST_CACHE, "application/json")
+    manifest = {**build_manifest(long_cycles, results, now), **(extra or {})}
+    previous = manifest_urls(store.get(manifest_key))
+    store.put(manifest_key, json.dumps(manifest, indent=1).encode(), MANIFEST_CACHE, "application/json")
 
     current = {r.spec.relative_path for r in results if not r.error}
-    stale = stale_keys(set(existing), current, previous)
+    stale = stale_keys(set(existing), current, previous) if prune else []
     if stale:
         store.delete(stale)
     failures = sum(1 for r in results if r.error)

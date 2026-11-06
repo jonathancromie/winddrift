@@ -135,7 +135,68 @@ body {
   border-radius: 10px;
   background: var(--panel);
   backdrop-filter: blur(10px);
-  pointer-events: none;
+}
+
+.view-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#views {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#views[hidden] {
+  display: none;
+}
+
+#share {
+  flex: none;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#share:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+#views:focus-visible,
+#share:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#view-summary {
+  margin-top: 8px;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.replay .now-marker {
+  display: none;
+}
+
+/* A replay is all past, with no forecast segment. */
+.time-track.replay::before {
+  background: var(--past);
 }
 
 .brand h1 {
@@ -440,6 +501,27 @@ body {
   #now {
     min-height: 38px;
     padding: 0 10px;
+  }
+}
+
+/* Small screens: keep the map visible. The safety note appears once a tracer is released. */
+@media (max-width: 640px), (max-height: 500px) {
+  #source,
+  #view-summary,
+  .tracer[data-active="false"] .tracer-note {
+    display: none;
+  }
+
+  .view-row {
+    margin-top: 6px;
+  }
+
+  .tracer p {
+    margin-top: 4px;
+  }
+
+  .tracer-note {
+    font-size: 11px;
   }
 }
 

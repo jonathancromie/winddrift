@@ -1,12 +1,23 @@
-import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from "maplibre-gl";
+import type { Feature } from "geojson";
+import { Map as MapLibreMap, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import "./styles.css";
 import type { FrameGrid } from "./data/frame";
 import type { WorkerResponse } from "./data/frame.worker";
 import { FrameStore, type FrameLoader } from "./data/frameStore";
-import { coarsen, NEST_FADE_MS, nestWeight, prepareFrames, type Manifest, type TimedFrame } from "./data/manifest";
+import {
+  coarsen,
+  NEST_FADE_MS,
+  nestWeight,
+  prepareFrames,
+  type Manifest,
+  type TimedFrame,
+  type ViewsIndex,
+} from "./data/manifest";
+import { nightRing } from "./render/night";
 import { ParticleLayer, type WindTextures } from "./render/particleLayer";
+import { buildShare, parseShare, type ShareState } from "./share";
 import { TracerController } from "./tracer/controller";
 import {
   advance,
@@ -29,6 +40,8 @@ const TEXTURE_CAPACITY = 16;
 const CSS_PIXELS_PER_PARTICLE = 30;
 const LONG_STEP_MS = 3 * HOUR_MS;
 const NOW_REFRESH_MS = 60 * 1000;
+const NIGHT_REFRESH_MS = 10 * 60 * 1000;
+const NIGHT_SOURCE = "night";
 const PLAY_ICON = "M4 2.5v11l9-5.5z";
 const PAUSE_ICON = "M4 2.5h3v11H4zM9 2.5h3v11H9z";
 
@@ -50,15 +63,43 @@ function createLoader(): FrameLoader {
   return loader;
 }
 
-const fullDate = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZoneName: "short",
-});
-const shortDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+function dateFormats(timeZone?: string) {
+  return {
+    full: new Intl.DateTimeFormat(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+      timeZone,
+    }),
+    short: new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone }),
+  };
+}
+
+/** Fill the view picker. The site still works if this fails, so failure only hides it. */
+async function populateViews(picker: HTMLSelectElement, currentView?: string): Promise<void> {
+  try {
+    const response = await fetch(`${DATA_URL}views/index.json`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { views } = (await response.json()) as ViewsIndex;
+    const groups = new Map<string, HTMLOptGroupElement>();
+    for (const view of views) {
+      let group = groups.get(view.group);
+      if (!group) {
+        group = document.createElement("optgroup");
+        group.label = view.group;
+        groups.set(view.group, group);
+        picker.append(group);
+      }
+      group.append(new Option(view.title, view.id, false, view.id === currentView));
+    }
+  } catch (error) {
+    console.warn(`Showcase views unavailable: ${String(error)}`);
+    if (!currentView) picker.hidden = true;
+  }
+}
 
 function addTerrain(map: MapLibreMap, beforeId: string | undefined): void {
   map.addSource("terrain", {
@@ -91,18 +132,25 @@ async function start(): Promise<void> {
     return;
   }
 
-  const response = await fetch(`${DATA_URL}manifest.json`);
-  if (!response.ok) throw new Error(`Couldn't load wind data (HTTP ${response.status}).`);
-  const manifest = (await response.json()) as Manifest;
+  const shared = parseShare(location.search);
+  const response = await fetch(`${DATA_URL}${shared.view ? `views/${shared.view}/` : ""}manifest.json`);
+  const missing = shared.view ? `There's no view called "${shared.view}".` : "Couldn't load wind data.";
+  if (!response.ok) throw new Error(missing);
+  const manifest = (await response.json().catch(() => {
+    throw new Error(missing);
+  })) as Manifest;
+  const view = manifest.view;
+  const formats = dateFormats(view?.timeZone);
   const baseFrames = prepareFrames(manifest.models.gfs.frames);
   const nestFrames = prepareFrames(manifest.models.hrrr.frames);
 
   const map = new MapLibreMap({
     container: "map",
     style: BASEMAP,
-    center: [-98, 38],
-    zoom: 3.4,
+    center: shared.camera ? [shared.camera.lon, shared.camera.lat] : (view?.center ?? [-98, 38]),
+    zoom: shared.camera?.zoom ?? view?.zoom ?? 3.4,
     minZoom: 1.5,
+    maxBounds: view?.maxBounds,
     maxZoom: 11,
     renderWorldCopies: false,
     attributionControl: { customAttribution: "Wind: NOAA HRRR and GFS" },
@@ -114,6 +162,7 @@ async function start(): Promise<void> {
 
   const firstSymbol = map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
   addTerrain(map, firstSymbol);
+  if (view?.night) addNight(map, firstSymbol);
 
   const params = new URLSearchParams(location.search);
   const mobile = matchMedia("(pointer: coarse)").matches;
@@ -122,6 +171,13 @@ async function start(): Promise<void> {
     ? new ParticleLayer(forcedParticles, 0.001)
     : new ParticleLayer(mobile ? 30_000 : 100_000, CSS_PIXELS_PER_PARTICLE);
   map.addLayer(layer, firstSymbol);
+
+  // For people who ask for less motion: particles draw a still picture of the wind, and move
+  // only briefly when the time or the map changes.
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  layer.setStill(reducedMotion.matches);
+  reducedMotion.addEventListener("change", () => layer.setStill(reducedMotion.matches));
+  map.on("move", () => layer.wake());
 
   const slider = element<HTMLInputElement>("time");
   const track = element("time-track");
@@ -143,18 +199,34 @@ async function start(): Promise<void> {
     return button;
   });
 
-  const firstMs = Math.min(baseFrames[0].timeMs, nestFrames[0].timeMs);
-  const lastMs = Math.max(baseFrames[baseFrames.length - 1].timeMs, nestFrames[nestFrames.length - 1].timeMs);
+  // A replay spans its regional frames. Its global frames extend past them to cover both ends.
+  const nestStartMs = nestFrames[0].timeMs;
+  const nestEndMs = nestFrames[nestFrames.length - 1].timeMs;
+  const firstMs = view ? nestStartMs : Math.min(baseFrames[0].timeMs, nestStartMs);
+  const lastMs = view ? nestEndMs : Math.max(baseFrames[baseFrames.length - 1].timeMs, nestEndMs);
   slider.min = String(firstMs);
   slider.max = String(lastMs);
-  element("range-start").textContent = shortDate.format(firstMs);
-  element("range-end").textContent = shortDate.format(lastMs);
+  element("range-start").textContent = formats.short.format(firstMs);
+  element("range-end").textContent = formats.short.format(lastMs);
 
-  const tracer = new TracerController(map, DATA_URL, baseFrames, nestFrames, lastMs, (ms) => fullDate.format(ms));
+  const nestFadeMs = view ? 0 : NEST_FADE_MS;
+  const tracer = new TracerController(
+    map,
+    DATA_URL,
+    baseFrames,
+    nestFrames,
+    lastMs,
+    (ms) => formats.full.format(ms),
+    nestFadeMs,
+  );
   tracer.addLayers(firstSymbol);
 
   const clamp = (timeMs: number) => Math.min(Math.max(timeMs, firstMs), lastMs);
-  let timeMs = clamp(Date.now());
+  const openingTime = view ? (view.opensAt ? Date.parse(view.opensAt) : firstMs) : Date.now();
+  let timeMs = clamp(shared.timeMs ?? openingTime);
+  let timeChosen = shared.timeMs !== undefined;
+  let cameraMoved = shared.camera !== undefined;
+  let lastNightMs = Number.NEGATIVE_INFINITY;
   let playing = false;
   let speed = SPEEDS[0];
   let lastTick = 0;
@@ -198,7 +270,7 @@ async function start(): Promise<void> {
     const b = baseStore.get(base.b)!;
     const wind: WindTextures = { a: a.resource, b: b.resource, mix: base.mix, grid: a.grid };
 
-    const weight = nestWeight(nestFrames, timeMs, NEST_FADE_MS);
+    const weight = nestWeight(nestFrames, timeMs, nestFadeMs);
     const pair = weight > 0 ? pairToDisplay(activeFrames(nestFrames), timeMs, nestStore) : null;
     if (pair?.exact && nestMask) {
       const nestA = nestStore.get(pair.a)!;
@@ -221,8 +293,36 @@ async function start(): Promise<void> {
   }
 
   function updateNowMarker(): void {
+    if (view) return;
     track.style.setProperty("--now", String(timelineFraction(Date.now(), firstMs, lastMs)));
     element("data-age").textContent = dataAgeText(Date.parse(manifest.generated), Date.now());
+  }
+
+  function cameraKey(): string {
+    const center = map.getCenter();
+    return `${center.lng.toFixed(3)},${center.lat.toFixed(3)},${map.getZoom().toFixed(2)}`;
+  }
+
+  function currentShareState(forLink: boolean): ShareState {
+    const center = map.getCenter();
+    return {
+      view: view?.id,
+      timeMs: forLink || timeChosen ? timeMs : undefined,
+      camera: forLink || cameraMoved ? { lon: center.lng, lat: center.lat, zoom: map.getZoom() } : undefined,
+      tracer: tracer.shareState,
+    };
+  }
+
+  /** Keep the address current, so reloading or copying it returns to the same place. */
+  function syncAddress(): void {
+    history.replaceState(null, "", location.pathname + buildShare(currentShareState(false), location.search));
+  }
+
+  function updateNight(): void {
+    // The terminator barely moves in a few minutes, and redrawing it isn't free.
+    if (!view?.night || Math.abs(timeMs - lastNightMs) < NIGHT_REFRESH_MS) return;
+    lastNightMs = timeMs;
+    (map.getSource(NIGHT_SOURCE) as GeoJSONSource).setData(nightShape(timeMs));
   }
 
   function applyTime(): void {
@@ -233,7 +333,7 @@ async function start(): Promise<void> {
       {
         playing,
         lookahead: playing ? speed.lookahead : SPEEDS[0].lookahead,
-        nestActive: nestWeight(nestFrames, timeMs, NEST_FADE_MS) > 0,
+        nestActive: nestWeight(nestFrames, timeMs, nestFadeMs) > 0,
       },
       (index) => baseStore.isReady(index),
       (index) => nestStore.isReady(index),
@@ -244,16 +344,18 @@ async function start(): Promise<void> {
     const { wind, ready, nested } = currentWind();
     if (wind) layer.setWind(wind);
     tracer.setTime(timeMs);
+    updateNight();
     updateStatus(!ready);
 
     slider.value = String(timeMs);
-    const timeText = fullDate.format(timeMs);
-    const phaseText = phaseAt(timeMs, Date.now());
+    const timeText = formats.full.format(timeMs);
+    const phaseText = view ? "Replay" : phaseAt(timeMs, Date.now());
     label.textContent = timeText;
     phase.textContent = phaseText;
     phase.dataset.phase = phaseText;
     slider.setAttribute("aria-valuetext", `${timeText}, ${phaseText}`);
-    source.textContent = nested ? "10 m wind · HRRR over the US, GFS elsewhere" : "10 m wind · GFS";
+    const regional = view?.loop ? "10 m wind · HRRR at about 3 km" : "10 m wind · HRRR over the US, GFS elsewhere";
+    source.textContent = nested ? regional : "10 m wind · GFS";
   }
 
   function setPlaying(next: boolean): void {
@@ -267,6 +369,7 @@ async function start(): Promise<void> {
     }
     // Pausing or starting can change which frames are in use.
     applyTime();
+    if (!next && timeChosen) syncAddress();
   }
 
   function setSpeed(next: (typeof SPEEDS)[number]): void {
@@ -280,7 +383,9 @@ async function start(): Promise<void> {
   function step(direction: 1 | -1, long: boolean): void {
     setPlaying(false);
     timeMs = stepTime(timeMs, direction, long ? LONG_STEP_MS : HOUR_MS, firstMs, lastMs);
+    timeChosen = true;
     applyTime();
+    syncAddress();
   }
 
   function tick(now: number): void {
@@ -288,16 +393,19 @@ async function start(): Promise<void> {
     const seconds = Math.min((now - lastTick) / 1000, 0.1);
     lastTick = now;
     const result = advance(timeMs, lastMs, seconds, speed.multiplier, currentWind().ready);
-    timeMs = result.timeMs;
+    timeMs = result.ended && view?.loop ? firstMs : result.timeMs;
+    timeChosen = true;
     applyTime();
-    if (result.ended) setPlaying(false);
+    if (result.ended && !view?.loop) setPlaying(false);
     else requestAnimationFrame(tick);
   }
 
   slider.addEventListener("input", () => {
     timeMs = Number(slider.value);
+    timeChosen = true;
     applyTime();
   });
+  slider.addEventListener("change", syncAddress);
   // The slider's own step is too fine for the arrow keys to be useful over several days.
   slider.addEventListener("keydown", (event) => {
     const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
@@ -310,10 +418,57 @@ async function start(): Promise<void> {
   element("step-forward").addEventListener("click", (event) => step(1, event.shiftKey));
   speedButtons.forEach((button, i) => button.addEventListener("click", () => setSpeed(SPEEDS[i])));
   nowButton.addEventListener("click", () => {
+    if (view) {
+      location.assign(location.pathname);
+      return;
+    }
     setPlaying(false);
     timeMs = clamp(Date.now());
+    timeChosen = false;
     applyTime();
+    syncAddress();
   });
+
+  const picker = element<HTMLSelectElement>("views");
+  void populateViews(picker, view?.id);
+  picker.addEventListener("change", () => {
+    location.assign(location.pathname + buildShare({ view: picker.value || undefined }, location.search));
+  });
+
+  const shareButton = element<HTMLButtonElement>("share");
+  shareButton.addEventListener("click", async () => {
+    const link = location.origin + location.pathname + buildShare(currentShareState(true));
+    let message = "Copied";
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      history.replaceState(null, "", link);
+      message = "Copy from address bar";
+    }
+    shareButton.textContent = message;
+    setTimeout(() => (shareButton.textContent = "Share"), 2500);
+  });
+
+  // Only a real change counts: resizing the window also ends in this event.
+  const openingCamera = cameraKey();
+  map.on("moveend", () => {
+    if (cameraKey() === openingCamera && !cameraMoved) return;
+    cameraMoved = true;
+    syncAddress();
+  });
+  tracer.onChange = syncAddress;
+
+  if (view) {
+    nowButton.textContent = "Live";
+    nowButton.setAttribute("aria-label", "Back to live wind");
+    track.classList.add("replay");
+    track.style.setProperty("--now", "1");
+    element("data-age").textContent = view.loop ? "Loops every 24 hours" : "";
+    const summary = element("view-summary");
+    summary.textContent = view.summary;
+    summary.hidden = false;
+    document.title = `${view.title} · WindDrift`;
+  }
 
   updateNowMarker();
   setInterval(updateNowMarker, NOW_REFRESH_MS);
@@ -329,9 +484,34 @@ async function start(): Promise<void> {
   }
 
   applyTime();
+
+  // A shared link's tracer comes first, then one the view opens with.
+  const release = shared.tracer ?? viewTracer(view);
+  if (release && release.timeMs >= firstMs && release.timeMs <= lastMs) {
+    tracer.restore(release.lon, release.lat, release.timeMs, release.preset);
+  }
+}
+
+function viewTracer(view: Manifest["view"]): ShareState["tracer"] {
+  if (!view?.tracer) return undefined;
+  const { lon, lat, time } = view.tracer;
+  return { lon, lat, timeMs: Date.parse(time), preset: "smoke" };
+}
+
+function nightShape(timeMs: number): Feature {
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [nightRing(timeMs)] } };
+}
+
+function addNight(map: MapLibreMap, beforeId: string | undefined): void {
+  map.addSource(NIGHT_SOURCE, { type: "geojson", data: nightShape(Date.now()) });
+  map.addLayer(
+    { id: "night", type: "fill", source: NIGHT_SOURCE, paint: { "fill-color": "#000000", "fill-opacity": 0.45 } },
+    beforeId,
+  );
 }
 
 start().catch((error: unknown) => {
   console.error(error);
+  element("status").textContent = "";
   showNotice(error instanceof Error ? error.message : "Something went wrong loading WindDrift.");
 });

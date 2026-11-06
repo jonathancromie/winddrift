@@ -14,6 +14,7 @@ export interface TracerRun {
   dataUrl: string;
   baseFrames: TimedFrame[];
   nestFrames: TimedFrame[];
+  nestFadeMs: number;
 }
 
 export type TracerRequest = TracerRun | { type: "cancel"; id: number };
@@ -31,7 +32,7 @@ async function run(request: TracerRun): Promise<void> {
     const response = await fetch(`${request.dataUrl}${frame.url}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return decodeFrame(await response.arrayBuffer());
-  });
+  }, request.nestFadeMs);
   const preset = PRESETS[request.preset];
   const send = (plume: Plume, done: boolean) => {
     // Copies, because the run keeps writing to its own arrays.

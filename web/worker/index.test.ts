@@ -42,6 +42,9 @@ describe("keyForPath", () => {
     ["/data/manifest.json", "manifest.json"],
     ["/data/gfs/2026110518/f240.wdf", "gfs/2026110518/f240.wdf"],
     ["/data/hrrr/2026110518/f000.wdf", "hrrr/2026110518/f000.wdf"],
+    ["/data/views/index.json", "views/index.json"],
+    ["/data/views/la-fires/manifest.json", "views/la-fires/manifest.json"],
+    ["/data/views/la-fires/hrrr/2025010612/f000.wdf", "views/la-fires/hrrr/2025010612/f000.wdf"],
   ])("serves %s", (path, key) => {
     expect(keyForPath(path)).toBe(key);
   });
@@ -59,6 +62,13 @@ describe("keyForPath", () => {
     "/data/gfs/2026110518/f0000.wdf",
     "/data/gfs/2026110518/f000.wdf/extra",
     "/data/manifest.json.bak",
+    "/data/views/",
+    "/data/views/secret.json",
+    "/data/views/../manifest.json",
+    "/data/views/a/b/manifest.json",
+    "/data/views/UPPER/manifest.json",
+    "/data/views/la-fires/secret.wdf",
+    "/data/views/la-fires/rrfs/2025010612/f000.wdf",
   ])("refuses %s", (path) => {
     expect(keyForPath(path)).toBeNull();
   });
@@ -86,6 +96,16 @@ describe("handleRequest", () => {
     const response = await handleRequest(request("/data/manifest.json"), env, context(), cache);
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
     expect(response.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("gives view listings short caching and view frames permanent caching", async () => {
+    const frame = "views/helene/gfs/2024092512/f000.wdf";
+    const { env } = bucketWith({ "views/helene/manifest.json": "{}", [frame]: "wind" });
+    const listing = await handleRequest(request("/data/views/helene/manifest.json"), env, context(), memoryCache());
+    expect(listing.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(listing.headers.get("content-type")).toBe("application/json");
+    const viewFrame = await handleRequest(request(`/data/${frame}`), env, context(), memoryCache());
+    expect(viewFrame.headers.get("cache-control")).toContain("immutable");
   });
 
   it("answers a second request from the cache without reading the bucket", async () => {
