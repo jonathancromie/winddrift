@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framePairAt, prepareFrames } from "./manifest";
+import { framePairAt, nestWeight, prepareFrames } from "./manifest";
 
 const frames = prepareFrames([
   { time: "2026-11-05T06:00:00Z", url: "c", bytes: 1 },
@@ -16,6 +16,27 @@ describe("prepareFrames", () => {
 
   it("rejects an empty list", () => {
     expect(() => prepareFrames([])).toThrow();
+  });
+});
+
+describe("nestWeight", () => {
+  const HOUR = 3600 * 1000;
+  const weight = (time: string) => nestWeight(frames, Date.parse(time), 2 * HOUR);
+
+  it("is zero at and beyond both ends", () => {
+    expect(weight("2026-11-04T00:00:00Z")).toBe(0);
+    expect(weight("2026-11-05T00:00:00Z")).toBe(0);
+    expect(weight("2026-11-05T07:00:00Z")).toBe(0);
+    expect(weight("2026-11-06T00:00:00Z")).toBe(0);
+  });
+
+  it("fades over the given time at each end", () => {
+    expect(weight("2026-11-05T01:00:00Z")).toBeCloseTo(0.5);
+    expect(weight("2026-11-05T06:00:00Z")).toBeCloseTo(0.5);
+  });
+
+  it("is full strength in the middle", () => {
+    expect(weight("2026-11-05T03:30:00Z")).toBe(1);
   });
 });
 

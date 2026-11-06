@@ -71,6 +71,60 @@ function undeltaRows(values: Int16Array, nx: number, ny: number, offset: number)
   }
 }
 
+/** True when a grid wraps all the way around the Earth, so it has no east or west edge. */
+export function isGlobal(grid: FrameGrid): boolean {
+  return grid.nx * grid.dlon >= 359.9;
+}
+
+/**
+ * Build a blend weight per cell (0-255) that rises from 0 at the edge of a regional
+ * model's data to full strength `fadeCells` inside it. Cells with no data, and
+ * anything beyond the grid, count as outside.
+ */
+export function edgeFadeMask(frame: DecodedFrame, fadeCells: number): Uint8Array {
+  const { nx, ny } = frame.grid;
+  const distance = new Float32Array(nx * ny);
+  const DIAGONAL = Math.SQRT2;
+  const at = (row: number, col: number) =>
+    row < 0 || row >= ny || col < 0 || col >= nx ? 0 : distance[row * nx + col];
+
+  // Two-pass chamfer distance: one sweep picks up edges behind, the other edges ahead.
+  for (let row = 0; row < ny; row++) {
+    for (let col = 0; col < nx; col++) {
+      const i = row * nx + col;
+      distance[i] =
+        frame.u[i] === NODATA
+          ? 0
+          : Math.min(
+              at(row, col - 1) + 1,
+              at(row - 1, col) + 1,
+              at(row - 1, col - 1) + DIAGONAL,
+              at(row - 1, col + 1) + DIAGONAL,
+            );
+    }
+  }
+  for (let row = ny - 1; row >= 0; row--) {
+    for (let col = nx - 1; col >= 0; col--) {
+      const i = row * nx + col;
+      distance[i] = Math.min(
+        distance[i],
+        at(row, col + 1) + 1,
+        at(row + 1, col) + 1,
+        at(row + 1, col + 1) + DIAGONAL,
+        at(row + 1, col - 1) + DIAGONAL,
+      );
+    }
+  }
+
+  const mask = new Uint8Array(nx * ny);
+  for (let i = 0; i < mask.length; i++) {
+    // The outermost data cell sits at distance 1, and it should still have no weight.
+    const t = Math.min(Math.max((distance[i] - 1) / fadeCells, 0), 1);
+    mask[i] = Math.round(t * t * (3 - 2 * t) * 255);
+  }
+  return mask;
+}
+
 /** Convert a JS number to the IEEE 754 half-float bit pattern, rounding to nearest. */
 export function toHalfFloat(value: number): number {
   const floats = new Float32Array(1);

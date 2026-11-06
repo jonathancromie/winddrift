@@ -21,6 +21,12 @@ uniform sampler2D u_windA;
 uniform sampler2D u_windB;
 uniform float u_mix;
 uniform vec4 u_grid;     // lon origin, lat origin, lon span, lat span
+uniform sampler2D u_nestA;
+uniform sampler2D u_nestB;
+uniform sampler2D u_nestMask;
+uniform float u_nestMix;
+uniform float u_nestWeight; // 0 turns the regional model off
+uniform vec4 u_nestGrid;
 uniform vec4 u_bounds;   // west, south, east, north in degrees
 uniform vec2 u_mercatorY; // top and bottom of the view in Mercator Y
 uniform float u_windSeconds;
@@ -46,6 +52,16 @@ void main() {
 
   vec2 uv = vec2(lon - u_grid.x, lat - u_grid.y) / u_grid.zw;
   vec2 wind = mix(textureLod(u_windA, uv, 0.0).rg, textureLod(u_windB, uv, 0.0).rg, u_mix);
+
+  if (u_nestWeight > 0.0) {
+    vec2 nestUv = vec2(lon - u_nestGrid.x, lat - u_nestGrid.y) / u_nestGrid.zw;
+    // Clamped sampling reads the mask's zero border for anywhere outside the grid.
+    float blend = textureLod(u_nestMask, nestUv, 0.0).r * u_nestWeight;
+    if (blend > 0.0) {
+      vec2 nest = mix(textureLod(u_nestA, nestUv, 0.0).rg, textureLod(u_nestB, nestUv, 0.0).rg, u_nestMix);
+      wind = mix(wind, nest, blend);
+    }
+  }
 
   float cosLat = max(cos(radians(lat)), 0.01);
   lon += wind.x * u_windSeconds / (EARTH_RADIUS * cosLat) * RADIANS_TO_DEGREES;

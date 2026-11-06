@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { decodeFrame, toHalfFloat, toHalfFloatRG } from "./frame";
+import { decodeFrame, edgeFadeMask, isGlobal, toHalfFloat, toHalfFloatRG, type DecodedFrame } from "./frame";
 
 function fixture(): ArrayBuffer {
   const bytes = readFileSync(new URL("./__fixtures__/small.wdf", import.meta.url));
@@ -43,6 +43,57 @@ describe("decodeFrame", () => {
 
   it("rejects data that is not a frame", async () => {
     await expect(decodeFrame(new ArrayBuffer(40))).rejects.toThrow("Not a wind frame");
+  });
+});
+
+describe("isGlobal", () => {
+  it("separates a global grid from a regional one", () => {
+    const base = { lon0: 0, lat0: 0, dlat: 1, ny: 1 };
+    expect(isGlobal({ ...base, nx: 1440, dlon: 0.25 })).toBe(true);
+    expect(isGlobal({ ...base, nx: 1480, dlon: 0.05 })).toBe(false);
+  });
+});
+
+describe("edgeFadeMask", () => {
+  function frameWith(nx: number, ny: number, isNoData: (row: number, col: number) => boolean): DecodedFrame {
+    const u = new Int16Array(nx * ny);
+    for (let row = 0; row < ny; row++) {
+      for (let col = 0; col < nx; col++) u[row * nx + col] = isNoData(row, col) ? -32768 : 10;
+    }
+    return { grid: { nx, ny, lon0: 0, lat0: 0, dlon: 1, dlat: 1 }, scale: 0.05, u, v: u };
+  }
+
+  it("is zero on the grid border and full strength deep inside", () => {
+    const mask = edgeFadeMask(frameWith(41, 41, () => false), 10);
+    expect(mask[0]).toBe(0);
+    expect(mask[20]).toBe(0); // middle of the bottom row
+    expect(mask[20 * 41 + 20]).toBe(255);
+  });
+
+  it("rises steadily from the edge to full strength", () => {
+    const mask = edgeFadeMask(frameWith(41, 41, () => false), 10);
+    const row = Array.from(mask.subarray(20 * 41, 20 * 41 + 21));
+    for (let i = 1; i < row.length; i++) expect(row[i]).toBeGreaterThanOrEqual(row[i - 1]);
+    expect(row[5]).toBeGreaterThan(0);
+    expect(row[5]).toBeLessThan(255);
+  });
+
+  it("fades away from missing data inside the grid", () => {
+    const mask = edgeFadeMask(frameWith(41, 41, (row, col) => col >= 30 && row >= 0), 5);
+    expect(mask[20 * 41 + 35]).toBe(0);
+    expect(mask[20 * 41 + 29]).toBe(0);
+    expect(mask[20 * 41 + 15]).toBe(255);
+  });
+
+  it("measures distance in both sweep directions", () => {
+    const mask = edgeFadeMask(frameWith(41, 41, (row, col) => row === 20 && col === 20), 5);
+    const distanceFromHole = (r: number, c: number) => mask[r * 41 + c];
+    expect(distanceFromHole(20, 21)).toBe(0);
+    expect(distanceFromHole(20, 19)).toBe(0);
+    expect(distanceFromHole(21, 20)).toBe(0);
+    expect(distanceFromHole(19, 20)).toBe(0);
+    expect(distanceFromHole(20, 23)).toBe(distanceFromHole(20, 17));
+    expect(distanceFromHole(23, 20)).toBe(distanceFromHole(17, 20));
   });
 });
 

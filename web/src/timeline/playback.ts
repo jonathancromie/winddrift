@@ -3,6 +3,10 @@ import { framePairAt, type FramePair, type TimedFrame } from "../data/manifest";
 /** Model time per real second at normal speed: one model hour every five seconds. */
 export const MODEL_MS_PER_SECOND = (60 * 60 * 1000) / 5;
 const LOOKAHEAD_FRAMES = 2;
+/** Within this of the present, the timeline says "Now" rather than past or forecast. */
+const NOW_WINDOW_MS = 30 * 60 * 1000;
+
+export type TimelinePhase = "Past" | "Now" | "Forecast";
 
 export interface ReadyCheck {
   isReady(index: number): boolean;
@@ -39,21 +43,27 @@ export function pairToDisplay(
 }
 
 /**
- * Advance playback by real time. Holds position when the frames ahead aren't loaded,
- * and stops at the end of the range.
+ * Advance playback by real time. Holds position until the frames for the current time
+ * are loaded, and stops at the end of the range.
  */
 export function advance(
-  frames: TimedFrame[],
   timeMs: number,
+  endMs: number,
   realSeconds: number,
   speed: number,
-  ready: ReadyCheck,
-): { timeMs: number; buffering: boolean; ended: boolean } {
-  const end = frames[frames.length - 1].timeMs;
-  const { a, b } = framePairAt(frames, timeMs);
-  if (!ready.isReady(a) || !ready.isReady(b)) {
-    return { timeMs, buffering: true, ended: false };
-  }
-  const next = Math.min(timeMs + realSeconds * MODEL_MS_PER_SECOND * speed, end);
-  return { timeMs: next, buffering: false, ended: next >= end };
+  framesReady: boolean,
+): { timeMs: number; ended: boolean } {
+  if (!framesReady) return { timeMs, ended: false };
+  const next = Math.min(timeMs + realSeconds * MODEL_MS_PER_SECOND * speed, endMs);
+  return { timeMs: next, ended: next >= endMs };
+}
+
+export function phaseAt(timeMs: number, nowMs: number): TimelinePhase {
+  if (Math.abs(timeMs - nowMs) <= NOW_WINDOW_MS) return "Now";
+  return timeMs < nowMs ? "Past" : "Forecast";
+}
+
+/** Position of a time along the timeline, from 0 to 1. */
+export function timelineFraction(timeMs: number, startMs: number, endMs: number): number {
+  return Math.min(1, Math.max(0, (timeMs - startMs) / (endMs - startMs)));
 }

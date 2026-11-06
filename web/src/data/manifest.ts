@@ -26,6 +26,16 @@ export function prepareFrames(frames: ManifestFrame[]): TimedFrame[] {
     .sort((x, y) => x.timeMs - y.timeMs);
 }
 
+/**
+ * How strongly a regional model applies at a time. It fades in and out inside its own
+ * range, using real frames throughout, so reaching its last hour causes no jump.
+ */
+export function nestWeight(frames: TimedFrame[], timeMs: number, fadeMs: number): number {
+  const fromStart = timeMs - frames[0].timeMs;
+  const toEnd = frames[frames.length - 1].timeMs - timeMs;
+  return Math.max(0, Math.min(1, fromStart / fadeMs, toEnd / fadeMs));
+}
+
 /** Find the frames either side of a time. Times outside the range clamp to the end frame. */
 export function framePairAt(frames: TimedFrame[], timeMs: number): FramePair {
   const last = frames.length - 1;

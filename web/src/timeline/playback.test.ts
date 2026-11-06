@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { prepareFrames } from "../data/manifest";
-import { advance, framesToRequest, MODEL_MS_PER_SECOND, pairToDisplay, type ReadyCheck } from "./playback";
+import {
+  advance,
+  framesToRequest,
+  MODEL_MS_PER_SECOND,
+  pairToDisplay,
+  phaseAt,
+  timelineFraction,
+  type ReadyCheck,
+} from "./playback";
 
 const HOUR = 3600 * 1000;
 const frames = prepareFrames(
@@ -16,8 +24,7 @@ function readySet(...loaded: number[]): ReadyCheck {
   const set = new Set(loaded);
   return {
     isReady: (i) => set.has(i),
-    nearestReady: (i) =>
-      [...set].sort((x, y) => Math.abs(x - i) - Math.abs(y - i))[0],
+    nearestReady: (i) => [...set].sort((x, y) => Math.abs(x - i) - Math.abs(y - i))[0],
   };
 }
 
@@ -49,20 +56,40 @@ describe("pairToDisplay", () => {
 });
 
 describe("advance", () => {
+  const end = start + 12 * HOUR;
+
   it("moves at the requested speed", () => {
-    const result = advance(frames, start, 1, 5, readySet(0, 1));
-    expect(result.timeMs).toBe(start + 5 * MODEL_MS_PER_SECOND);
-    expect(result.buffering).toBe(false);
+    const result = advance(start, end, 1, 5, true);
+    expect(result).toEqual({ timeMs: start + 5 * MODEL_MS_PER_SECOND, ended: false });
   });
 
-  it("holds position while the current pair is missing", () => {
-    const result = advance(frames, start + HOUR, 1, 1, readySet(0));
-    expect(result).toEqual({ timeMs: start + HOUR, buffering: true, ended: false });
+  it("holds position while frames are missing", () => {
+    expect(advance(start + HOUR, end, 1, 1, false)).toEqual({ timeMs: start + HOUR, ended: false });
   });
 
   it("stops exactly at the end", () => {
-    const result = advance(frames, start + 11.9 * HOUR, 60, 1, readySet(3, 4));
-    expect(result.timeMs).toBe(start + 12 * HOUR);
-    expect(result.ended).toBe(true);
+    expect(advance(start + 11.9 * HOUR, end, 60, 1, true)).toEqual({ timeMs: end, ended: true });
+  });
+});
+
+describe("phaseAt", () => {
+  const now = start + 6 * HOUR;
+
+  it.each([
+    [now - 2 * HOUR, "Past"],
+    [now - 0.25 * HOUR, "Now"],
+    [now, "Now"],
+    [now + 0.25 * HOUR, "Now"],
+    [now + 2 * HOUR, "Forecast"],
+  ])("labels time %d as %s", (time, phase) => {
+    expect(phaseAt(time, now)).toBe(phase);
+  });
+});
+
+describe("timelineFraction", () => {
+  it("maps times along the range and clamps outside it", () => {
+    expect(timelineFraction(5, 0, 10)).toBe(0.5);
+    expect(timelineFraction(-5, 0, 10)).toBe(0);
+    expect(timelineFraction(15, 0, 10)).toBe(1);
   });
 });

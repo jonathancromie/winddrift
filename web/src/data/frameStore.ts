@@ -11,6 +11,8 @@ export interface FrameStoreOptions<T> {
   loader: FrameLoader;
   upload(grid: FrameGrid, data: Uint16Array): T;
   release(resource: T): void;
+  /** Receives the model's edge mask, which arrives once, with its first frame. */
+  onMask?(grid: FrameGrid, mask: Uint8Array): void;
   capacity: number;
   onChange(): void;
   onError(url: string, message: string): void;
@@ -83,6 +85,7 @@ export class FrameStore<T> {
       this.options.onError(response.url, response.message);
       return;
     }
+    if (response.mask) this.options.onMask?.(response.grid, response.mask);
     if (this.ready.has(index)) return;
     const resource = this.options.upload(response.grid, response.data);
     this.ready.set(index, { resource, grid: response.grid, used: ++this.clock });

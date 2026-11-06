@@ -1,6 +1,7 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
-import type { FrameGrid } from "../data/frame";
+import { isGlobal, type FrameGrid } from "../data/frame";
 import { MAX_MERCATOR_LAT, mercatorY, timeCompression } from "./geo";
+import { ParticleBudget } from "./particleBudget";
 import {
   COMPOSITE_FRAG,
   EMPTY_FRAG,
@@ -13,9 +14,6 @@ import {
 
 const STATE_FLOATS = 4;
 const PIXELS_PER_SECOND_PER_MS = 2.2;
-const MIN_PARTICLES = 5000;
-const SLOW_FRAME_MS = 22;
-const FAST_FRAME_MS = 18;
 
 type Uniforms = Record<string, WebGLUniformLocation | null>;
 
@@ -29,11 +27,16 @@ interface StateBuffer {
   buffer: WebGLBuffer;
 }
 
-export interface WindTextures {
+export interface WindPair {
   a: WebGLTexture;
   b: WebGLTexture;
   mix: number;
   grid: FrameGrid;
+}
+
+export interface WindTextures extends WindPair {
+  /** A regional model blended over the global wind. */
+  nest?: WindPair & { mask: WebGLTexture; weight: number };
 }
 
 export interface ParticleLayerStats {
@@ -64,10 +67,9 @@ export class ParticleLayer implements CustomLayerInterface {
   private wind: WindTextures | null = null;
   private frame = 0;
   private lastTime = 0;
-  private fastFrames = 0;
 
   /** How many particles the device can sustain, separate from how many look good. */
-  private budget: number;
+  private readonly budget: ParticleBudget;
 
   /**
    * @param capacity Most particles the GPU buffers can hold.
@@ -77,7 +79,7 @@ export class ParticleLayer implements CustomLayerInterface {
     private readonly capacity: number,
     private readonly cssPixelsPerParticle: number,
   ) {
-    this.budget = capacity;
+    this.budget = new ParticleBudget(capacity);
     this.stats.particles = capacity;
   }
 
@@ -96,7 +98,23 @@ export class ParticleLayer implements CustomLayerInterface {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, grid.nx, grid.ny, 0, gl.RG, gl.HALF_FLOAT, data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    // Only a global grid joins up across the antimeridian.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, isGlobal(grid) ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return texture;
+  }
+
+  createMaskTexture(grid: FrameGrid, mask: Uint8Array): WebGLTexture {
+    const gl = this.gl;
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, grid.nx, grid.ny, 0, gl.RED, gl.UNSIGNED_BYTE, mask);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindTexture(gl.TEXTURE_2D, null);
     return texture;
@@ -195,19 +213,10 @@ export class ParticleLayer implements CustomLayerInterface {
   }
 
   private adaptParticleCount(elapsedMs: number): void {
-    // Skip long gaps, such as a backgrounded tab, which say nothing about draw cost.
-    if (elapsedMs > 250) return;
-    const stats = this.stats;
-    stats.frameMs += (elapsedMs - stats.frameMs) * 0.05;
     const canvas = this.map.getCanvas();
     const wanted = Math.floor((canvas.clientWidth * canvas.clientHeight) / this.cssPixelsPerParticle);
-    if (stats.frameMs > SLOW_FRAME_MS) {
-      this.budget = Math.max(MIN_PARTICLES, Math.floor(Math.min(this.budget, stats.particles) * 0.98));
-      this.fastFrames = 0;
-    } else if (stats.frameMs < FAST_FRAME_MS && ++this.fastFrames > 120) {
-      this.budget = Math.min(this.capacity, Math.ceil(this.budget * 1.02));
-    }
-    stats.particles = Math.max(Math.min(MIN_PARTICLES, this.capacity), Math.min(this.budget, wanted));
+    this.stats.particles = this.budget.update(elapsedMs, wanted);
+    this.stats.frameMs = this.budget.frameMs;
   }
 
   private step(gl: WebGL2RenderingContext, seconds: number, wind: WindTextures): void {
@@ -227,14 +236,25 @@ export class ParticleLayer implements CustomLayerInterface {
     gl.bindTexture(gl.TEXTURE_2D, wind.b);
     gl.uniform1i(uniforms.u_windB, 1);
     gl.uniform1f(uniforms.u_mix, wind.mix);
-    // Grid values sit at cell centres, half a cell inside the texture edge.
-    gl.uniform4f(
-      uniforms.u_grid,
-      grid.lon0 - grid.dlon / 2,
-      grid.lat0 - grid.dlat / 2,
-      grid.nx * grid.dlon,
-      grid.ny * grid.dlat,
-    );
+    gl.uniform4fv(uniforms.u_grid, gridUniform(grid));
+
+    const { nest } = wind;
+    gl.uniform1f(uniforms.u_nestWeight, nest ? nest.weight : 0);
+    if (nest) {
+      const textures: [string, WebGLTexture][] = [
+        ["u_nestA", nest.a],
+        ["u_nestB", nest.b],
+        ["u_nestMask", nest.mask],
+      ];
+      textures.forEach(([name, texture], i) => {
+        gl.activeTexture(gl.TEXTURE2 + i);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(uniforms[name], 2 + i);
+      });
+      gl.uniform1f(uniforms.u_nestMix, nest.mix);
+      gl.uniform4fv(uniforms.u_nestGrid, gridUniform(nest.grid));
+    }
+
     gl.uniform4f(uniforms.u_bounds, west, south, east, north);
     gl.uniform2f(uniforms.u_mercatorY, mercatorY(north), mercatorY(south));
     gl.uniform1f(
@@ -303,6 +323,16 @@ export class ParticleLayer implements CustomLayerInterface {
     this.trails = [createTrailTexture(gl, width, height), createTrailTexture(gl, width, height)];
     this.trailSize = [width, height];
   }
+}
+
+/** Texture placement as origin and span. Values sit at cell centres, half a cell inside the edge. */
+function gridUniform(grid: FrameGrid): number[] {
+  return [
+    grid.lon0 - grid.dlon / 2,
+    grid.lat0 - grid.dlat / 2,
+    grid.nx * grid.dlon,
+    grid.ny * grid.dlat,
+  ];
 }
 
 function createTrailTexture(gl: WebGL2RenderingContext, width: number, height: number): WebGLTexture {

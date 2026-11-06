@@ -1,12 +1,16 @@
-import { decodeFrame, toHalfFloatRG } from "./frame";
+import { decodeFrame, edgeFadeMask, isGlobal, toHalfFloatRG, type FrameGrid } from "./frame";
 
 export type WorkerRequest = { type: "load"; url: string } | { type: "cancel"; url: string };
 
 export type WorkerResponse =
-  | { type: "loaded"; url: string; grid: import("./frame").FrameGrid; data: Uint16Array }
+  | { type: "loaded"; url: string; grid: FrameGrid; data: Uint16Array; mask?: Uint8Array }
   | { type: "failed"; url: string; message: string };
 
+/** About 1.5 degrees on the HRRR grid: wide enough to hide the seam with the global model. */
+const EDGE_FADE_CELLS = 30;
+
 const inFlight = new Map<string, AbortController>();
+let maskSent = false;
 
 async function load(url: string): Promise<void> {
   const controller = new AbortController();
@@ -17,8 +21,11 @@ async function load(url: string): Promise<void> {
     const frame = await decodeFrame(await response.arrayBuffer());
     if (controller.signal.aborted) return;
     const data = toHalfFloatRG(frame);
-    const message: WorkerResponse = { type: "loaded", url, grid: frame.grid, data };
-    self.postMessage(message, { transfer: [data.buffer] });
+    // A model's data covers the same cells in every frame, so one mask serves them all.
+    const mask = !maskSent && !isGlobal(frame.grid) ? edgeFadeMask(frame, EDGE_FADE_CELLS) : undefined;
+    maskSent ||= mask !== undefined;
+    const message: WorkerResponse = { type: "loaded", url, grid: frame.grid, data, mask };
+    self.postMessage(message, { transfer: mask ? [data.buffer, mask.buffer] : [data.buffer] });
   } catch (error) {
     if (controller.signal.aborted) return;
     const message: WorkerResponse = { type: "failed", url, message: String(error) };

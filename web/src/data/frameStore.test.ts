@@ -105,6 +105,24 @@ describe("FrameStore", () => {
     expect(store.nearestReady(3)).toBe(4);
   });
 
+  it("passes along an edge mask that arrives with a frame", () => {
+    const masks: Uint8Array[] = [];
+    const withMask = new FrameStore<string>({
+      urls: ["f0"],
+      loader,
+      upload: () => "tex",
+      release: () => {},
+      onMask: (_, mask) => masks.push(mask),
+      capacity: 2,
+      onChange: () => {},
+      onError: () => {},
+    });
+    withMask.request([0]);
+    const mask = new Uint8Array(1);
+    loader.onmessage!({ type: "loaded", url: "f0", grid, data: new Uint16Array(2), mask });
+    expect(masks).toEqual([mask]);
+  });
+
   it("reports failures and allows a retry", () => {
     store.request([0]);
     loader.fail("f0");

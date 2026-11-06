@@ -1,17 +1,18 @@
 # WindDrift
 
-Animated wind particles over a map, with a timeline running through the forecast.
+Animated wind particles over a map, with a timeline running from recent days through the forecast.
 
-Status: running locally on a GFS forecast sequence. High-resolution US data, the past timeline, tracers and public hosting aren't built yet.
+Status: running locally, with HRRR over the US blended into global GFS. Tracers, playback speeds and public hosting aren't built yet.
 
 ## Run it
 
 You need [uv](https://docs.astral.sh/uv/), Node, and npm 11 (npm 10.9 crashes installing these dependencies, so use `npx npm@11` if needed).
 
 ```sh
-# 1. Build wind frames. Use a recent model run: YYYYMMDDHH, where HH is 00, 06, 12 or 18.
+# 1. Build wind frames: 3 days of past plus the latest forecasts, about 300 MB.
+#    A rerun resumes where it stopped, and removes frames that have aged out.
 cd pipeline
-uv run python -m winddrift.build_local 2026110500 --hours 48 --step 3
+uv run python -m winddrift.build_local --past-days 3
 
 # 2. Start the app at http://localhost:5173
 cd ../web

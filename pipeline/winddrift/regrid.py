@@ -33,6 +33,10 @@ class WindField:
     v: np.ndarray
 
 
+# Covers HRRR's whole domain at about 5 km. The curved domain leaves the corners empty.
+HRRR_GRID = LatLonGrid(-134.0, 21.0, 0.05, 0.05, 1480, 640)
+
+
 def gfs_to_field(raw: RawWind) -> WindField:
     """Reorder GFS (north to south, lon 0 to 360) into the shared layout (lon -180 first)."""
     u, v = raw.u, raw.v
