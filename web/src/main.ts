@@ -33,7 +33,9 @@ import {
   advance,
   dataAgeText,
   HOUR_MS,
+  isNewerData,
   loadPlan,
+  newDataAction,
   pairToDisplay,
   phaseAt,
   SPEEDS,
@@ -50,6 +52,11 @@ const TEXTURE_CAPACITY = 16;
 const CSS_PIXELS_PER_PARTICLE = 30;
 const LONG_STEP_MS = 3 * HOUR_MS;
 const NOW_REFRESH_MS = 60 * 1000;
+/** Each time step briefly moves the still picture, so reduced motion takes fewer of them. */
+const REDUCED_MOTION_FOLLOW_MS = 15 * 60 * 1000;
+const NEW_DATA_CHECK_MS = 15 * 60 * 1000;
+/** Returning to a tab checks sooner, but no faster than the manifest's cache lifetime. */
+const NEW_DATA_RECHECK_MS = 5 * 60 * 1000;
 const NIGHT_REFRESH_MS = 10 * 60 * 1000;
 const NIGHT_SOURCE = "night";
 const LEGEND_TICKS_C = [-20, 0, 20, 40];
@@ -202,6 +209,7 @@ async function start(): Promise<void> {
   const playButton = element<HTMLButtonElement>("play");
   const playIcon = element("play-icon");
   const nowButton = element<HTMLButtonElement>("now");
+  const refreshButton = element<HTMLButtonElement>("new-forecast");
   const speedGroup = element("speeds");
   const speedButtons = SPEEDS.map((option, i) => {
     const button = document.createElement("button");
@@ -241,6 +249,9 @@ async function start(): Promise<void> {
   let timeChosen = shared.timeMs !== undefined;
   let cameraMoved = shared.camera !== undefined;
   let lastNightMs = Number.NEGATIVE_INFINITY;
+  let lastFollowMs = Date.now();
+  let lastDataCheckMs = Date.now();
+  let newerData = false;
   let playing = false;
   let speed = SPEEDS[0];
   let lastTick = 0;
@@ -484,6 +495,54 @@ async function start(): Promise<void> {
     source.textContent = temperatureOn ? `${windSource} · 2 m temperature` : windSource;
   }
 
+  /** Live means the timeline stays on the current time until someone moves it. */
+  function isFollowing(): boolean {
+    return !view && !timeChosen && !playing;
+  }
+
+  function followNow(): void {
+    // A background tab has no one to show it to, so it catches up when it's next seen.
+    if (!isFollowing() || document.hidden) return;
+    const nowMs = Date.now();
+    if (reducedMotion.matches && nowMs - lastFollowMs < REDUCED_MOTION_FOLLOW_MS) return;
+    lastFollowMs = nowMs;
+    const next = clamp(nowMs);
+    if (next === timeMs) return;
+    timeMs = next;
+    applyTime();
+  }
+
+  /** Reload onto the newest data. The address restores the view, time, camera and tracer. */
+  function reloadForNewData(): void {
+    syncAddress();
+    location.reload();
+  }
+
+  function actOnNewData(): void {
+    const action = newDataAction(newerData, {
+      following: isFollowing(),
+      hidden: document.hidden,
+      failed,
+      hasTracer: tracer.shareState !== undefined,
+    });
+    refreshButton.hidden = action !== "offer";
+    if (action === "reload") reloadForNewData();
+  }
+
+  async function checkForNewData(): Promise<void> {
+    lastDataCheckMs = Date.now();
+    try {
+      const response = await fetch(`${DATA_URL}manifest.json`);
+      if (!response.ok) return;
+      const latest = (await response.json()) as Partial<Manifest>;
+      newerData = isNewerData(manifest.generated, latest.generated);
+      actOnNewData();
+    } catch (error) {
+      // The current data still works, and the next check will try again.
+      console.warn(`Couldn't check for new wind data: ${String(error)}`);
+    }
+  }
+
   function setPlaying(next: boolean): void {
     playing = next;
     playIcon.setAttribute("d", next ? PAUSE_ICON : PLAY_ICON);
@@ -555,6 +614,7 @@ async function start(): Promise<void> {
     applyTime();
     syncAddress();
   });
+  refreshButton.addEventListener("click", reloadForNewData);
 
   const picker = element<HTMLSelectElement>("views");
   void populateViews(picker, view?.id);
@@ -679,7 +739,20 @@ async function start(): Promise<void> {
   }
 
   updateNowMarker();
-  setInterval(updateNowMarker, NOW_REFRESH_MS);
+  if (!view) {
+    const keepCurrent = () => {
+      updateNowMarker();
+      followNow();
+      actOnNewData();
+    };
+    setInterval(keepCurrent, NOW_REFRESH_MS);
+    setInterval(() => void checkForNewData(), NEW_DATA_CHECK_MS);
+    // Timers slow or stop in a background tab or on a sleeping laptop, so catch up on return.
+    document.addEventListener("visibilitychange", () => {
+      keepCurrent();
+      if (!document.hidden && Date.now() - lastDataCheckMs >= NEW_DATA_RECHECK_MS) void checkForNewData();
+    });
+  }
 
   if (params.has("debug")) {
     const stats = element("stats");
@@ -704,6 +777,10 @@ async function start(): Promise<void> {
         temperatureAt,
         temperatureLayer,
         getTempStores: () => tempStores,
+        followNow,
+        checkForNewData,
+        actOnNewData,
+        timeMs: () => timeMs,
       },
     });
   }

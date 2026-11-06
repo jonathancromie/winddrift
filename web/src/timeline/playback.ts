@@ -143,6 +143,27 @@ export function phaseAt(timeMs: number, nowMs: number): TimelinePhase {
   return timeMs < nowMs ? "Past" : "Forecast";
 }
 
+/** Whether a freshly fetched manifest is newer than the one this page was built from. */
+export function isNewerData(currentGenerated: string, latestGenerated: unknown): boolean {
+  return typeof latestGenerated === "string" && Date.parse(latestGenerated) > Date.parse(currentGenerated);
+}
+
+export type NewDataAction = "none" | "offer" | "reload";
+
+/**
+ * What to do about newer data. The page reloads by itself only when that can't disturb anyone:
+ * nobody has picked a time or released a tracer, and the tab is out of sight or its frames have
+ * stopped loading. Otherwise it offers the update and leaves the choice to the viewer.
+ */
+export function newDataAction(
+  newer: boolean,
+  state: { following: boolean; hidden: boolean; failed: boolean; hasTracer: boolean },
+): NewDataAction {
+  if (!newer) return "none";
+  const undisturbed = state.following && !state.hasTracer;
+  return undisturbed && (state.hidden || state.failed) ? "reload" : "offer";
+}
+
 /** Position of a time along the timeline, from 0 to 1. */
 export function timelineFraction(timeMs: number, startMs: number, endMs: number): number {
   return Math.min(1, Math.max(0, (timeMs - startMs) / (endMs - startMs)));

@@ -5,8 +5,10 @@ import {
   dataAgeText,
   framesToRequest,
   HOUR_MS as HOUR,
+  isNewerData,
   loadPlan,
   MODEL_MS_PER_SECOND,
+  newDataAction,
   pairToDisplay,
   phaseAt,
   SPEEDS,
@@ -214,6 +216,47 @@ describe("phaseAt", () => {
     [now + 2 * HOUR, "Forecast"],
   ])("labels time %d as %s", (time, phase) => {
     expect(phaseAt(time, now)).toBe(phase);
+  });
+});
+
+describe("isNewerData", () => {
+  const current = "2026-11-06T12:00:00Z";
+
+  it("accepts only a later time", () => {
+    expect(isNewerData(current, "2026-11-06T18:00:00Z")).toBe(true);
+    expect(isNewerData(current, current)).toBe(false);
+    expect(isNewerData(current, "2026-11-06T06:00:00Z")).toBe(false);
+  });
+
+  it.each([[undefined], [null], [42], ["not a date"]])("ignores a malformed value: %s", (value) => {
+    expect(isNewerData(current, value)).toBe(false);
+  });
+});
+
+describe("newDataAction", () => {
+  const live = { following: true, hidden: false, failed: false, hasTracer: false };
+
+  it("does nothing without newer data, even if frames are failing", () => {
+    expect(newDataAction(false, { ...live, hidden: true, failed: true })).toBe("none");
+  });
+
+  it("offers the update to someone watching live", () => {
+    expect(newDataAction(true, live)).toBe("offer");
+  });
+
+  it("reloads a live page in a background tab", () => {
+    expect(newDataAction(true, { ...live, hidden: true })).toBe("reload");
+  });
+
+  it("reloads a live page whose frames have stopped loading", () => {
+    expect(newDataAction(true, { ...live, failed: true })).toBe("reload");
+  });
+
+  it.each([
+    ["a chosen time", { following: false }],
+    ["a tracer", { hasTracer: true }],
+  ])("never reloads over %s", (_, change) => {
+    expect(newDataAction(true, { ...live, hidden: true, failed: true, ...change })).toBe("offer");
   });
 });
 
