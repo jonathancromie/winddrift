@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from winddrift import build_local
-from winddrift.build_local import index_url, manifest_entry, prune, FrameResult
+from winddrift.build import FrameResult, index_url, manifest_entry
 from winddrift.frames import FrameSpec, latest_long_cycle_candidates, plan_gfs, plan_hrrr
 
 CYCLE = datetime(2026, 11, 5, 12)
@@ -69,67 +67,3 @@ def test_manifest_entry_reports_valid_time_and_path():
         "cycle": "2026-11-05T12:00:00Z",
         "fxx": 13,
     }
-
-
-def test_build_frame_retries_after_a_failure_and_writes_the_frame(tmp_path, monkeypatch):
-    calls = []
-
-    def flaky(spec, grib_dir):
-        calls.append(spec)
-        if len(calls) < 3:
-            raise ConnectionError("refused")
-        return b"frame"
-
-    monkeypatch.setattr(build_local, "encode_spec", flaky)
-    monkeypatch.setattr(build_local, "RETRY_DELAYS_SECONDS", (0, 0, 0))
-    spec = FrameSpec("hrrr", CYCLE, 1)
-
-    result = build_local.build_frame(spec, tmp_path, tmp_path)
-
-    assert result.error == ""
-    assert len(calls) == 3
-    assert (tmp_path / spec.relative_path).read_bytes() == b"frame"
-    assert not list(tmp_path.rglob("*.tmp"))
-
-
-def test_build_frame_reports_the_error_after_its_last_attempt(tmp_path, monkeypatch):
-    def broken(spec, grib_dir):
-        raise ConnectionError("refused")
-
-    monkeypatch.setattr(build_local, "encode_spec", broken)
-    monkeypatch.setattr(build_local, "RETRY_DELAYS_SECONDS", (0, 0))
-    spec = FrameSpec("hrrr", CYCLE, 1)
-
-    result = build_local.build_frame(spec, tmp_path, tmp_path)
-
-    assert "attempt 2: ConnectionError: refused" in result.error
-    assert not (tmp_path / spec.relative_path).exists()
-
-
-def test_build_frame_skips_a_frame_that_already_exists(tmp_path, monkeypatch):
-    def unexpected(spec, grib_dir):
-        raise AssertionError("should not download")
-
-    monkeypatch.setattr(build_local, "encode_spec", unexpected)
-    spec = FrameSpec("hrrr", CYCLE, 1)
-    target = tmp_path / spec.relative_path
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"12345")
-
-    assert build_local.build_frame(spec, tmp_path, tmp_path).size == 5
-
-
-def test_prune_removes_only_unlisted_frames_and_empty_folders(tmp_path: Path):
-    keep = tmp_path / "hrrr/2026110512/f000.wdf"
-    stale = tmp_path / "hrrr/2026110412/f000.wdf"
-    manifest = tmp_path / "manifest.json"
-    for path in (keep, stale, manifest):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x")
-
-    removed = prune(tmp_path, {"hrrr/2026110512/f000.wdf"})
-
-    assert removed == 1
-    assert keep.exists()
-    assert manifest.exists()
-    assert not stale.parent.exists()

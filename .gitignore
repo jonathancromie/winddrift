@@ -8,3 +8,5 @@ dist/
 *.idx
 *.grib2
 web/public/data/
+.wrangler/
+.dev.vars*

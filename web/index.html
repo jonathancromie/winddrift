@@ -34,7 +34,7 @@
             <output id="time-label" for="time">&nbsp;</output>
             <span id="phase"></span>
           </span>
-          <span id="status" aria-live="polite"></span>
+          <span id="status" aria-live="polite">Loading…</span>
         </div>
         <div id="time-track" class="time-track">
           <input id="time" type="range" min="0" max="1" value="0" step="60000" aria-label="Time" />
@@ -42,6 +42,7 @@
         </div>
         <div class="timeline-range" aria-hidden="true">
           <span id="range-start"></span>
+          <span id="data-age"></span>
           <span id="range-end"></span>
         </div>
       </div>

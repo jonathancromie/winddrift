@@ -97,6 +97,14 @@ export function advance(
   return { timeMs: next, ended: next >= endMs };
 }
 
+/** How old the wind data is, in words for the timeline. */
+export function dataAgeText(generatedMs: number, nowMs: number): string {
+  const hours = Math.floor((nowMs - generatedMs) / HOUR_MS);
+  if (hours < 1) return "Updated just now";
+  if (hours < 48) return `Updated ${hours} h ago`;
+  return `Updated ${Math.floor(hours / 24)} days ago`;
+}
+
 export function phaseAt(timeMs: number, nowMs: number): TimelinePhase {
   if (Math.abs(timeMs - nowMs) <= NOW_WINDOW_MS) return "Now";
   return timeMs < nowMs ? "Past" : "Forecast";

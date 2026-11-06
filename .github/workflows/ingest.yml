@@ -1,0 +1,38 @@
+name: Ingest wind data
+
+on:
+  # GFS and HRRR finish their long runs a few hours after 00, 06, 12 and 18 UTC.
+  schedule:
+    - cron: "20 5,11,17,23 * * *"
+  workflow_dispatch:
+    inputs:
+      past_days:
+        description: Days of history to keep
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - name: Build and publish frames
+        run: uv run python -m winddrift.build --r2 --past-days "$PAST_DAYS" --workers 4
+        env:
+          PAST_DAYS: ${{ inputs.past_days || '30' }}
+          R2_BUCKET: winddrift-data
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

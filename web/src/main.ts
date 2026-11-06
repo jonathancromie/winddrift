@@ -10,6 +10,7 @@ import { ParticleLayer, type WindTextures } from "./render/particleLayer";
 import { TracerController } from "./tracer/controller";
 import {
   advance,
+  dataAgeText,
   framesToRequest,
   HOUR_MS,
   pairToDisplay,
@@ -107,7 +108,9 @@ async function start(): Promise<void> {
     attributionControl: { customAttribution: "Wind: NOAA HRRR and GFS" },
   });
   map.addControl(new NavigationControl({ showCompass: false }), "top-right");
-  await map.once("load");
+  // Start once the style is ready. Waiting for "load" would hold the wind back until every
+  // map and terrain tile had arrived.
+  await map.once("style.load");
 
   const firstSymbol = map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
   addTerrain(map, firstSymbol);
@@ -219,6 +222,7 @@ async function start(): Promise<void> {
 
   function updateNowMarker(): void {
     track.style.setProperty("--now", String(timelineFraction(Date.now(), firstMs, lastMs)));
+    element("data-age").textContent = dataAgeText(Date.parse(manifest.generated), Date.now());
   }
 
   function applyTime(): void {

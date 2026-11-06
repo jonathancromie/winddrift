@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   worker: { format: "es" },
-  build: { target: "es2022" },
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  // public/ only holds local development frames, which production serves from R2.
+  build: { target: "es2022", copyPublicDir: false },
+  test: { environment: "node", include: ["src/**/*.test.ts", "worker/**/*.test.ts"] },
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { coarsen, prepareFrames } from "../data/manifest";
 import {
   advance,
+  dataAgeText,
   framesToRequest,
   HOUR_MS as HOUR,
   MODEL_MS_PER_SECOND,
@@ -143,6 +144,19 @@ describe("stepTime", () => {
   it("stops at both ends", () => {
     expect(stepTime(start, -1, HOUR, ...range)).toBe(start);
     expect(stepTime(start + 12 * HOUR, 1, HOUR, ...range)).toBe(start + 12 * HOUR);
+  });
+});
+
+describe("dataAgeText", () => {
+  it.each([
+    [0, "Updated just now"],
+    [0.5, "Updated just now"],
+    [1, "Updated 1 h ago"],
+    [47.9, "Updated 47 h ago"],
+    [48, "Updated 2 days ago"],
+    [24 * 9, "Updated 9 days ago"],
+  ])("describes %d hours", (hours, text) => {
+    expect(dataAgeText(0, hours * HOUR)).toBe(text);
   });
 });
 
