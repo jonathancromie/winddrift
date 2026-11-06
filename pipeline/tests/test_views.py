@@ -200,10 +200,12 @@ def test_temperature_frames_get_their_own_paths_and_manifest_series():
     assert temp.valid == wind.valid
 
 
-def test_only_sea_breeze_loops_carry_temperature_for_now():
+def test_every_view_carries_temperature_for_every_wind_frame():
     for view in VIEWS:
-        has_temperature = any(s.variable == "temp" for s in view.specs())
-        assert has_temperature == view.close_up
+        specs = view.specs()
+        wind = [s for s in specs if s.variable == "wind"]
+        temperature = [s for s in specs if s.variable == "temp"]
+        assert [s.valid for s in temperature] == [s.valid for s in wind]
 
 
 def test_manifest_lists_temperature_separately(tmp_path, no_downloads):

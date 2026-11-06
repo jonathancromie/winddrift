@@ -60,11 +60,10 @@ class View:
 
     def specs(self) -> list[FrameSpec]:
         prefix = f"views/{self.id}/"
-        specs = plan_past_gfs(self.start, self.end, prefix) + plan_past_hrrr(
-            self.start, self.end, prefix, self.grid
+        return with_temperature(
+            plan_past_gfs(self.start, self.end, prefix)
+            + plan_past_hrrr(self.start, self.end, prefix, self.grid)
         )
-        # Sea breezes are driven by land heating faster than water, so loops show temperature too.
-        return with_temperature(specs) if self.close_up else specs
 
     def manifest_fields(self) -> dict:
         fields = {
