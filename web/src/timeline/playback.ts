@@ -66,6 +66,39 @@ export function pairToDisplay(
   return { a: nearest, b: nearest, mix: 0, exact: false };
 }
 
+export interface LoadPlan {
+  base: number[];
+  nest: number[];
+}
+
+/**
+ * What to download next. While paused, frames come in order of what they show: the global
+ * wind first so something appears quickly, then regional detail, then frames ahead for
+ * play. While playing, everything loads together, because stopping a frame part way to
+ * fetch a higher priority one would waste the download.
+ */
+export function loadPlan(
+  base: TimedFrame[],
+  nest: TimedFrame[],
+  timeMs: number,
+  options: { playing: boolean; lookahead: number; nestActive: boolean },
+  baseReady: (index: number) => boolean,
+  nestReady: (index: number) => boolean,
+): LoadPlan {
+  const { playing, lookahead, nestActive } = options;
+  const fullNest = nestActive ? framesToRequest(nest, timeMs, lookahead) : [];
+  const fullBase = framesToRequest(base, timeMs, lookahead);
+  if (playing) return { base: fullBase, nest: fullNest };
+
+  const basePair = framesToRequest(base, timeMs, 0);
+  if (!basePair.every(baseReady)) return { base: basePair, nest: [] };
+  if (!nestActive) return { base: fullBase, nest: [] };
+
+  const nestPair = framesToRequest(nest, timeMs, 0);
+  if (!nestPair.every(nestReady)) return { base: basePair, nest: nestPair };
+  return { base: fullBase, nest: fullNest };
+}
+
 /** The next whole multiple of a step in a direction, so stepping lands on tidy times. */
 export function stepTime(
   timeMs: number,

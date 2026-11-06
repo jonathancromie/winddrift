@@ -5,6 +5,7 @@ import {
   dataAgeText,
   framesToRequest,
   HOUR_MS as HOUR,
+  loadPlan,
   MODEL_MS_PER_SECOND,
   pairToDisplay,
   phaseAt,
@@ -107,6 +108,48 @@ describe("coarse frame lists", () => {
   it("doesn't need the skipped frames to be loaded", () => {
     expect(pairToDisplay(coarse, base + 4 * HOUR, readySet(3, 6))?.exact).toBe(true);
     expect(pairToDisplay(hourly, base + 4.5 * HOUR, readySet(3, 6))?.exact).toBe(false);
+  });
+});
+
+describe("loadPlan", () => {
+  const hourly = prepareFrames(
+    Array.from({ length: 13 }, (_, h) => ({
+      time: `2026-11-05T${String(h).padStart(2, "0")}:00:00Z`,
+      url: `h${h}`,
+      bytes: 1,
+    })),
+  );
+  const t = start + 1.5 * HOUR;
+  const paused = { playing: false, lookahead: 2, nestActive: true };
+  const has = (...loaded: number[]) => (i: number) => loaded.includes(i);
+
+  it("starts with only the global pair, so wind appears as soon as possible", () => {
+    expect(loadPlan(frames, hourly, t, paused, has(), has())).toEqual({ base: [0, 1], nest: [] });
+  });
+
+  it("moves on to the regional pair once the global pair is in", () => {
+    expect(loadPlan(frames, hourly, t, paused, has(0, 1), has())).toEqual({ base: [0, 1], nest: [1, 2] });
+  });
+
+  it("loads ahead only after everything needed now is in", () => {
+    expect(loadPlan(frames, hourly, t, paused, has(0, 1), has(1, 2))).toEqual({
+      base: [0, 1, 2, 3],
+      nest: [1, 2, 3, 4],
+    });
+  });
+
+  it("skips the regional stage when the regional model is off", () => {
+    const options = { ...paused, nestActive: false };
+    expect(loadPlan(frames, hourly, t, options, has(), has())).toEqual({ base: [0, 1], nest: [] });
+    expect(loadPlan(frames, hourly, t, options, has(0, 1), has())).toEqual({ base: [0, 1, 2, 3], nest: [] });
+  });
+
+  it("requests everything at once during playback, to avoid cancelling part-way downloads", () => {
+    const playing = { playing: true, lookahead: 2, nestActive: true };
+    expect(loadPlan(frames, hourly, t, playing, has(), has())).toEqual({
+      base: [0, 1, 2, 3],
+      nest: [1, 2, 3, 4],
+    });
   });
 });
 

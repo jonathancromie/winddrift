@@ -9,9 +9,15 @@ MANIFEST_CACHE = "public, max-age=300"
 # A frame's key names its model run and hour, so its contents never change.
 FRAME_CACHE = "public, max-age=31536000, immutable"
 DELETE_BATCH = 1000
+ACCESS_CHECK_KEY = "access-check.tmp"
+
+
+class StoreAccessError(RuntimeError):
+    """The store's credentials can't do what the pipeline needs. Retrying won't help."""
 
 
 class Store(Protocol):
+    def check_access(self) -> None: ...
     def list(self) -> dict[str, int]: ...
     def get(self, key: str) -> bytes | None: ...
     def put(self, key: str, data: bytes, cache_control: str, content_type: str) -> None: ...
@@ -21,6 +27,9 @@ class Store(Protocol):
 class LocalStore:
     def __init__(self, root: Path) -> None:
         self.root = root
+
+    def check_access(self) -> None:
+        """A local folder either works or fails clearly on the first write."""
 
     def list(self) -> dict[str, int]:
         return {
@@ -83,6 +92,19 @@ class R2Store:
                 ),
             )
         return self._client
+
+    def check_access(self) -> None:
+        """Try a write and a delete, so a bad token fails now and not after hours of work."""
+        from botocore.exceptions import ClientError
+
+        try:
+            self.put(ACCESS_CHECK_KEY, b"ok", "no-store", "text/plain")
+            self.delete([ACCESS_CHECK_KEY])
+        except (ClientError, RuntimeError) as error:
+            raise StoreAccessError(
+                f"The R2 token can't write and delete in bucket {self.bucket}. "
+                f"It needs Object Read & Write permission. Details: {error}"
+            ) from error
 
     def list(self) -> dict[str, int]:
         found: dict[str, int] = {}

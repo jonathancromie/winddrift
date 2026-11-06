@@ -141,6 +141,7 @@ def publish(
     workers: int,
 ) -> int:
     """Upload missing frames, then the manifest, then remove old frames. Returns failures."""
+    store.check_access()
     existing = store.list()
     results = [FrameResult(s, existing[s.relative_path]) for s in specs if s.relative_path in existing]
     missing = [s for s in specs if s.relative_path not in existing]

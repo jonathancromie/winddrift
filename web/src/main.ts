@@ -11,8 +11,8 @@ import { TracerController } from "./tracer/controller";
 import {
   advance,
   dataAgeText,
-  framesToRequest,
   HOUR_MS,
+  loadPlan,
   pairToDisplay,
   phaseAt,
   SPEEDS,
@@ -226,10 +226,20 @@ async function start(): Promise<void> {
   }
 
   function applyTime(): void {
-    const lookahead = playing ? speed.lookahead : SPEEDS[0].lookahead;
-    baseStore.request(framesToRequest(activeFrames(baseFrames), timeMs, lookahead));
-    const weight = nestWeight(nestFrames, timeMs, NEST_FADE_MS);
-    nestStore.request(weight > 0 ? framesToRequest(activeFrames(nestFrames), timeMs, lookahead) : []);
+    const plan = loadPlan(
+      activeFrames(baseFrames),
+      activeFrames(nestFrames),
+      timeMs,
+      {
+        playing,
+        lookahead: playing ? speed.lookahead : SPEEDS[0].lookahead,
+        nestActive: nestWeight(nestFrames, timeMs, NEST_FADE_MS) > 0,
+      },
+      (index) => baseStore.isReady(index),
+      (index) => nestStore.isReady(index),
+    );
+    baseStore.request(plan.base);
+    nestStore.request(plan.nest);
 
     const { wind, ready, nested } = currentWind();
     if (wind) layer.setWind(wind);

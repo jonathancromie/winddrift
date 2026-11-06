@@ -4,11 +4,19 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 from winddrift import build
 from winddrift.build import build_frame, manifest_urls, publish, stale_keys
 from winddrift.frames import FrameSpec
-from winddrift.store import FRAME_CACHE, MANIFEST_CACHE, MANIFEST_KEY, LocalStore, R2Store
+from winddrift.store import (
+    FRAME_CACHE,
+    MANIFEST_CACHE,
+    MANIFEST_KEY,
+    LocalStore,
+    R2Store,
+    StoreAccessError,
+)
 
 CYCLE = datetime(2026, 11, 5, 12)
 NOW = datetime(2026, 11, 5, 18)
@@ -278,6 +286,57 @@ def test_r2_store_deletes_in_batches_and_reports_errors():
     s3.delete_errors = [{"Key": "x", "Code": "AccessDenied"}]
     with pytest.raises(RuntimeError, match="Couldn't delete"):
         store.delete(["x"])
+
+
+def denied(operation: str) -> ClientError:
+    return ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, operation)
+
+
+def test_access_check_writes_and_removes_its_test_file():
+    s3 = FakeS3()
+    R2Store("bucket", "account", client=s3).check_access()
+    assert s3.objects == {}
+    assert s3.delete_batches == [1]
+
+
+def test_access_check_explains_a_token_that_cannot_write():
+    s3 = FakeS3()
+
+    def refuse(**kwargs):
+        raise denied("PutObject")
+
+    s3.put_object = refuse
+    with pytest.raises(StoreAccessError, match="Object Read & Write"):
+        R2Store("bucket", "account", client=s3).check_access()
+
+
+def test_access_check_explains_a_token_that_cannot_delete():
+    s3 = FakeS3()
+
+    def refuse(**kwargs):
+        raise denied("DeleteObjects")
+
+    s3.delete_objects = refuse
+    with pytest.raises(StoreAccessError, match="can't write and delete"):
+        R2Store("bucket", "account", client=s3).check_access()
+
+
+def test_access_check_also_catches_errors_reported_inside_a_delete_response():
+    s3 = FakeS3()
+    s3.delete_errors = [{"Key": "access-check.tmp", "Code": "AccessDenied"}]
+    with pytest.raises(StoreAccessError):
+        R2Store("bucket", "account", client=s3).check_access()
+
+
+def test_publish_stops_before_any_work_when_the_store_refuses(tmp_path, no_downloads):
+    class Refusing(LocalStore):
+        def check_access(self):
+            raise StoreAccessError("no")
+
+    with pytest.raises(StoreAccessError):
+        publish(specs_for(CYCLE, range(2)), LONG_CYCLES, Refusing(tmp_path), tmp_path, NOW, 1)
+    assert no_downloads == []
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_r2_store_can_cross_into_a_worker_process():
