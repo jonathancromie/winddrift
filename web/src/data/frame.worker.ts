@@ -1,4 +1,14 @@
-import { decodeFrame, EDGE_FADE_CELLS, edgeFadeMask, isGlobal, toHalfFloatRG, type FrameGrid } from "./frame";
+import {
+  decodeFrame,
+  decodeScalarFrame,
+  EDGE_FADE_CELLS,
+  edgeFadeMask,
+  isGlobal,
+  isScalarFrame,
+  scalarToHalfFloat,
+  toHalfFloatRG,
+  type FrameGrid,
+} from "./frame";
 
 export type WorkerRequest = { type: "load"; url: string } | { type: "cancel"; url: string };
 
@@ -15,7 +25,16 @@ async function load(url: string): Promise<void> {
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const frame = await decodeFrame(await response.arrayBuffer());
+    const buffer = await response.arrayBuffer();
+    if (isScalarFrame(buffer)) {
+      const scalar = await decodeScalarFrame(buffer);
+      if (controller.signal.aborted) return;
+      const data = scalarToHalfFloat(scalar);
+      const message: WorkerResponse = { type: "loaded", url, grid: scalar.grid, data };
+      self.postMessage(message, { transfer: [data.buffer] });
+      return;
+    }
+    const frame = await decodeFrame(buffer);
     if (controller.signal.aborted) return;
     const data = toHalfFloatRG(frame);
     // A model's data covers the same cells in every frame, so one mask serves them all.

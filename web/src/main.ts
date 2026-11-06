@@ -15,8 +15,18 @@ import {
   type TimedFrame,
   type ViewsIndex,
 } from "./data/manifest";
+import { sampleBlended, type SampledFrame } from "./data/sample";
 import { nightRing } from "./render/night";
 import { ParticleLayer, type WindTextures } from "./render/particleLayer";
+import { TemperatureLayer, type TemperatureTextures } from "./render/temperatureLayer";
+import {
+  defaultUnit,
+  formatTemperature,
+  scaleCss,
+  SCALE_MAX_C,
+  SCALE_MIN_C,
+  type TemperatureUnit,
+} from "./render/temperatureScale";
 import { buildShare, parseShare, type ShareState } from "./share";
 import { TracerController } from "./tracer/controller";
 import {
@@ -42,6 +52,8 @@ const LONG_STEP_MS = 3 * HOUR_MS;
 const NOW_REFRESH_MS = 60 * 1000;
 const NIGHT_REFRESH_MS = 10 * 60 * 1000;
 const NIGHT_SOURCE = "night";
+const LEGEND_TICKS_C = [-20, 0, 20, 40];
+const UNIT_STORAGE_KEY = "winddrift-temperature-unit";
 const PLAY_ICON = "M4 2.5v11l9-5.5z";
 const PAUSE_ICON = "M4 2.5h3v11H4zM9 2.5h3v11H9z";
 
@@ -153,7 +165,7 @@ async function start(): Promise<void> {
     maxBounds: view?.maxBounds,
     maxZoom: 11,
     renderWorldCopies: false,
-    attributionControl: { customAttribution: "Wind: NOAA HRRR and GFS" },
+    attributionControl: { customAttribution: "Weather: NOAA HRRR and GFS" },
   });
   map.addControl(new NavigationControl({ showCompass: false }), "top-right");
   // Start once the style is ready. Waiting for "load" would hold the wind back until every
@@ -167,6 +179,8 @@ async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const mobile = matchMedia("(pointer: coarse)").matches;
   const forcedParticles = Number(params.get("particles"));
+  const temperatureLayer = new TemperatureLayer();
+  map.addLayer(temperatureLayer, view?.night ? "night" : firstSymbol);
   const layer = forcedParticles
     ? new ParticleLayer(forcedParticles, 0.001)
     : new ParticleLayer(mobile ? 30_000 : 100_000, CSS_PIXELS_PER_PARTICLE);
@@ -232,6 +246,7 @@ async function start(): Promise<void> {
   let lastTick = 0;
   let failed = false;
   let nestMask: WebGLTexture | null = null;
+  let nestMaskData: Uint8Array | null = null;
 
   function createStore(frames: TimedFrame[], onMask?: (grid: FrameGrid, mask: Uint8Array) => void) {
     return new FrameStore<WebGLTexture>({
@@ -255,7 +270,95 @@ async function start(): Promise<void> {
   const baseStore = createStore(baseFrames);
   const nestStore = createStore(nestFrames, (grid, mask) => {
     nestMask = layer.createMaskTexture(grid, mask);
+    nestMaskData = mask;
   });
+
+  // The temperature layer loads nothing until it's turned on.
+  const tempSeries = { base: manifest.models["gfs-temp"], nest: manifest.models["hrrr-temp"] };
+  const tempBaseFrames = tempSeries.base ? prepareFrames(tempSeries.base.frames) : null;
+  const tempNestFrames = tempSeries.nest ? prepareFrames(tempSeries.nest.frames) : null;
+  interface TempResource {
+    texture: WebGLTexture;
+    sampled: SampledFrame;
+  }
+  let tempStores: { base: FrameStore<TempResource>; nest: FrameStore<TempResource> } | null = null;
+  let temperatureOn = false;
+  let cursor: { lon: number; lat: number } | null = null;
+
+  function createTempStore(frames: TimedFrame[]): FrameStore<TempResource> {
+    return new FrameStore<TempResource>({
+      urls: frames.map((frame) => `${DATA_URL}${frame.url}`),
+      loader: createLoader(),
+      upload: (grid, data) => ({
+        texture: temperatureLayer.createTexture(grid, data),
+        sampled: { grid, data },
+      }),
+      release: (resource) => temperatureLayer.deleteTexture(resource.texture),
+      capacity: TEXTURE_CAPACITY,
+      onChange: () => {
+        failed = false;
+        applyTime();
+      },
+      onError: (url, message) => {
+        console.error(`Temperature frame failed: ${url}: ${message}`);
+        failed = true;
+        updateStatus(true);
+      },
+    });
+  }
+
+  /** The temperature to draw now, and whether it's the exact time rather than a stand-in. */
+  function currentTemperature(): { field: TemperatureTextures | null; ready: boolean } {
+    if (!tempStores || !tempBaseFrames || !tempNestFrames) return { field: null, ready: true };
+    const base = pairToDisplay(activeFrames(tempBaseFrames), timeMs, tempStores.base);
+    if (!base) return { field: null, ready: false };
+    const a = tempStores.base.get(base.a)!;
+    const b = tempStores.base.get(base.b)!;
+    const field: TemperatureTextures = { a: a.resource.texture, b: b.resource.texture, mix: base.mix, grid: a.grid };
+    const weight = nestWeight(tempNestFrames, timeMs, nestFadeMs);
+    const pair = weight > 0 ? pairToDisplay(activeFrames(tempNestFrames), timeMs, tempStores.nest) : null;
+    if (pair?.exact && nestMask) {
+      const nestA = tempStores.nest.get(pair.a)!;
+      const nestB = tempStores.nest.get(pair.b)!;
+      field.nest = {
+        a: nestA.resource.texture,
+        b: nestB.resource.texture,
+        mix: pair.mix,
+        grid: nestA.grid,
+        mask: nestMask,
+        weight,
+      };
+    }
+    return { field, ready: base.exact && (weight === 0 || field.nest !== undefined) };
+  }
+
+  /** The temperature at the cursor, computed the same way the shader draws it. */
+  function temperatureAt(lon: number, lat: number): number | null {
+    if (!tempStores || !tempBaseFrames || !tempNestFrames) return null;
+    const base = pairToDisplay(activeFrames(tempBaseFrames), timeMs, tempStores.base);
+    if (!base) return null;
+    const weight = nestWeight(tempNestFrames, timeMs, nestFadeMs);
+    const pair = weight > 0 ? pairToDisplay(activeFrames(tempNestFrames), timeMs, tempStores.nest) : null;
+    return sampleBlended(
+      {
+        baseA: tempStores.base.get(base.a)!.resource.sampled,
+        baseB: tempStores.base.get(base.b)!.resource.sampled,
+        baseMix: base.mix,
+        nest:
+          pair?.exact && nestMaskData
+            ? {
+                a: tempStores.nest.get(pair.a)!.resource.sampled,
+                b: tempStores.nest.get(pair.b)!.resource.sampled,
+                mix: pair.mix,
+                weight,
+                mask: nestMaskData,
+              }
+            : undefined,
+      },
+      lon,
+      lat,
+    );
+  }
 
   /** While playing fast, use wider-spaced frames. Paused views always use every frame. */
   function activeFrames(frames: TimedFrame[]): TimedFrame[] {
@@ -310,6 +413,7 @@ async function start(): Promise<void> {
       timeMs: forLink || timeChosen ? timeMs : undefined,
       camera: forLink || cameraMoved ? { lon: center.lng, lat: center.lat, zoom: map.getZoom() } : undefined,
       tracer: tracer.shareState,
+      temperature: temperatureOn || undefined,
     };
   }
 
@@ -340,9 +444,30 @@ async function start(): Promise<void> {
     );
     baseStore.request(plan.base);
     nestStore.request(plan.nest);
+    if (tempStores && tempBaseFrames && tempNestFrames) {
+      const stores = tempStores;
+      const tempPlan = loadPlan(
+        activeFrames(tempBaseFrames),
+        activeFrames(tempNestFrames),
+        timeMs,
+        {
+          playing,
+          lookahead: playing ? speed.lookahead : SPEEDS[0].lookahead,
+          nestActive: nestWeight(tempNestFrames, timeMs, nestFadeMs) > 0,
+        },
+        (index) => stores.base.isReady(index),
+        (index) => stores.nest.isReady(index),
+      );
+      stores.base.request(tempPlan.base);
+      stores.nest.request(tempPlan.nest);
+    }
 
-    const { wind, ready, nested } = currentWind();
+    const { wind, ready: windReady, nested } = currentWind();
     if (wind) layer.setWind(wind);
+    const temperature = currentTemperature();
+    temperatureLayer.setField(temperatureOn ? temperature.field : null);
+    const ready = windReady && (!temperatureOn || temperature.ready);
+    updateCursorReading();
     tracer.setTime(timeMs);
     updateNight();
     updateStatus(!ready);
@@ -355,7 +480,8 @@ async function start(): Promise<void> {
     phase.dataset.phase = phaseText;
     slider.setAttribute("aria-valuetext", `${timeText}, ${phaseText}`);
     const regional = view?.loop ? "10 m wind · HRRR at about 3 km" : "10 m wind · HRRR over the US, GFS elsewhere";
-    source.textContent = nested ? regional : "10 m wind · GFS";
+    const windSource = nested ? regional : "10 m wind · GFS";
+    source.textContent = temperatureOn ? `${windSource} · 2 m temperature` : windSource;
   }
 
   function setPlaying(next: boolean): void {
@@ -392,7 +518,8 @@ async function start(): Promise<void> {
     if (!playing) return;
     const seconds = Math.min((now - lastTick) / 1000, 0.1);
     lastTick = now;
-    const result = advance(timeMs, lastMs, seconds, speed.multiplier, currentWind().ready);
+    const framesReady = currentWind().ready && (!temperatureOn || currentTemperature().ready);
+    const result = advance(timeMs, lastMs, seconds, speed.multiplier, framesReady);
     timeMs = result.ended && view?.loop ? firstMs : result.timeMs;
     timeChosen = true;
     applyTime();
@@ -451,6 +578,87 @@ async function start(): Promise<void> {
 
   // Only a real change counts: resizing the window also ends in this event.
   const openingCamera = cameraKey();
+  const temperatureButton = element<HTMLButtonElement>("temperature");
+  const legend = element("temperature-legend");
+  const legendBar = element("legend-bar");
+  const legendTicks = element("legend-ticks");
+  const unitButton = element<HTMLButtonElement>("temperature-unit");
+  const reading = element("temperature-reading");
+  legendBar.style.background = scaleCss();
+
+  function savedUnit(): TemperatureUnit {
+    try {
+      const stored = localStorage.getItem(UNIT_STORAGE_KEY);
+      if (stored === "C" || stored === "F") return stored;
+    } catch {
+      // Storage can be blocked, and the default is fine then.
+    }
+    return defaultUnit(navigator.language);
+  }
+  let unit = savedUnit();
+
+  function renderLegend(): void {
+    const span = SCALE_MAX_C - SCALE_MIN_C;
+    legendTicks.replaceChildren(
+      ...LEGEND_TICKS_C.map((celsius) => {
+        const tick = document.createElement("span");
+        tick.textContent = formatTemperature(celsius, unit);
+        tick.style.left = `${((celsius - SCALE_MIN_C) / span) * 100}%`;
+        return tick;
+      }),
+    );
+    unitButton.textContent = `°${unit === "C" ? "F" : "C"}`;
+    unitButton.setAttribute("aria-label", `Show ${unit === "C" ? "Fahrenheit" : "Celsius"}`);
+    updateCursorReading();
+  }
+
+  function updateCursorReading(): void {
+    const value = temperatureOn && cursor ? temperatureAt(cursor.lon, cursor.lat) : null;
+    reading.textContent = value === null ? "" : formatTemperature(value, unit);
+  }
+
+  function setTemperature(on: boolean): void {
+    temperatureOn = on;
+    if (on && !tempStores && tempBaseFrames && tempNestFrames) {
+      tempStores = { base: createTempStore(tempBaseFrames), nest: createTempStore(tempNestFrames) };
+    }
+    temperatureButton.setAttribute("aria-pressed", String(on));
+    legend.hidden = !on;
+    layer.setPlain(on);
+    // Nothing still wanted, so downloads stop when the layer is turned off.
+    if (!on && tempStores) {
+      tempStores.base.request([]);
+      tempStores.nest.request([]);
+    }
+    if (on) renderLegend();
+    applyTime();
+  }
+
+  if (tempBaseFrames && tempNestFrames) {
+    temperatureButton.hidden = false;
+    temperatureButton.addEventListener("click", () => {
+      setTemperature(!temperatureOn);
+      syncAddress();
+    });
+    unitButton.addEventListener("click", () => {
+      unit = unit === "C" ? "F" : "C";
+      try {
+        localStorage.setItem(UNIT_STORAGE_KEY, unit);
+      } catch {
+        // The choice just won't be remembered.
+      }
+      renderLegend();
+    });
+    map.on("mousemove", (event) => {
+      cursor = { lon: event.lngLat.lng, lat: event.lngLat.lat };
+      updateCursorReading();
+    });
+    map.getCanvas().addEventListener("mouseleave", () => {
+      cursor = null;
+      updateCursorReading();
+    });
+  }
+
   map.on("moveend", () => {
     if (cameraKey() === openingCamera && !cameraMoved) return;
     cameraMoved = true;
@@ -480,10 +688,28 @@ async function start(): Promise<void> {
       const fps = 1000 / layer.stats.frameMs;
       stats.textContent = `${fps.toFixed(0)} fps · ${layer.stats.particles.toLocaleString()} particles`;
     }, 500);
-    Object.assign(window, { winddrift: { map, layer, tracer, baseStore, nestStore, currentWind, baseFrames, nestFrames } });
+    Object.assign(window, {
+      winddrift: {
+        map,
+        layer,
+        tracer,
+        baseStore,
+        nestStore,
+        currentWind,
+        baseFrames,
+        nestFrames,
+        tempBaseFrames,
+        tempNestFrames,
+        currentTemperature,
+        temperatureAt,
+        temperatureLayer,
+        getTempStores: () => tempStores,
+      },
+    });
   }
 
   applyTime();
+  if (shared.temperature && tempBaseFrames && tempNestFrames) setTemperature(true);
 
   // A shared link's tracer comes first, then one the view opens with.
   const release = shared.tracer ?? viewTracer(view);

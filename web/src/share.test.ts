@@ -10,6 +10,7 @@ describe("share links", () => {
       timeMs: T,
       camera: { lon: -118.5, lat: 34, zoom: 6.5 },
       tracer: { lon: -118.54, lat: 34.07, timeMs: T, preset: "pollen" },
+      temperature: true,
     };
     expect(parseShare(buildShare(state))).toEqual(state);
   });
@@ -45,6 +46,10 @@ describe("share links", () => {
     ["?tracer=0,0&released=nope", "tracer"],
   ])("ignores the invalid %s", (search, field) => {
     expect(parseShare(search)).not.toHaveProperty(field);
+  });
+
+  it("ignores an unknown layer", () => {
+    expect(parseShare("?layer=rainfall")).not.toHaveProperty("temperature");
   });
 
   it("defaults an unknown tracer kind to smoke", () => {

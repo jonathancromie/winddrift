@@ -21,10 +21,16 @@ from pathlib import Path
 
 import requests
 
-from .encode import encode_frame
-from .fetch import fetch_subset, read_wind
-from .frames import FrameSpec, latest_long_cycle_candidates, plan_gfs, plan_hrrr
-from .regrid import HRRR_GRID, gfs_to_field, hrrr_to_field
+from .encode import encode_frame, encode_scalar_frame
+from .fetch import TEMPERATURE_2M_SEARCH, fetch_subset, read_temperature, read_wind
+from .frames import FrameSpec, latest_long_cycle_candidates, plan_gfs, plan_hrrr, with_temperature
+from .regrid import (
+    HRRR_GRID,
+    gfs_temperature_to_field,
+    gfs_to_field,
+    hrrr_temperature_to_field,
+    hrrr_to_field,
+)
 from .store import FRAME_CACHE, MANIFEST_CACHE, MANIFEST_KEY, LocalStore, R2Store, Store
 
 REPO = Path(__file__).resolve().parents[2]
@@ -65,6 +71,8 @@ def find_long_cycle(model: str, final_hour: int, now: datetime) -> datetime:
 
 
 def encode_spec(spec: FrameSpec, grib_dir: Path) -> bytes:
+    if spec.variable == "temp":
+        return encode_temperature_spec(spec, grib_dir)
     path = fetch_subset(spec.model, spec.cycle, spec.fxx, grib_dir)
     try:
         raw = read_wind(path)
@@ -72,6 +80,17 @@ def encode_spec(spec: FrameSpec, grib_dir: Path) -> bytes:
         return encode_frame(field)
     finally:
         # Also removes a damaged download, so a retry fetches it afresh.
+        path.unlink(missing_ok=True)
+
+
+def encode_temperature_spec(spec: FrameSpec, grib_dir: Path) -> bytes:
+    path = fetch_subset(spec.model, spec.cycle, spec.fxx, grib_dir, TEMPERATURE_2M_SEARCH)
+    try:
+        raw = read_temperature(path)
+        if spec.model == "hrrr":
+            return encode_scalar_frame(hrrr_temperature_to_field(raw, spec.grid or HRRR_GRID))
+        return encode_scalar_frame(gfs_temperature_to_field(raw))
+    finally:
         path.unlink(missing_ok=True)
 
 
@@ -126,14 +145,18 @@ def build_manifest(
 ) -> dict:
     models = {}
     for model, cycle in long_cycles.items():
-        good = [r for r in results if r.spec.model == model and not r.error]
-        if not good:
-            raise RuntimeError(f"Every {model} frame failed")
-        good.sort(key=lambda r: r.spec.valid)
-        models[model] = {
-            "cycle": cycle.strftime("%Y-%m-%dT%H:00:00Z"),
-            "frames": [manifest_entry(r) for r in good],
-        }
+        for series in (model, f"{model}-temp"):
+            good = [r for r in results if r.spec.series == series and not r.error]
+            if not good:
+                # Temperature is optional, so losing it shouldn't take the wind down too.
+                if series == model:
+                    raise RuntimeError(f"Every {model} frame failed")
+                continue
+            good.sort(key=lambda r: r.spec.valid)
+            models[series] = {
+                "cycle": cycle.strftime("%Y-%m-%dT%H:00:00Z"),
+                "frames": [manifest_entry(r) for r in good],
+            }
     return {"generated": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "models": models}
 
 
@@ -193,8 +216,9 @@ def main() -> int:
         "gfs": find_long_cycle("gfs", GFS_FORECAST_HOURS, now),
         "hrrr": find_long_cycle("hrrr", HRRR_FORECAST_HOURS, now),
     }
-    specs = plan_gfs(long_cycles["gfs"], args.past_days, GFS_FORECAST_HOURS) + plan_hrrr(
-        long_cycles["hrrr"], args.past_days, HRRR_FORECAST_HOURS
+    specs = with_temperature(
+        plan_gfs(long_cycles["gfs"], args.past_days, GFS_FORECAST_HOURS)
+        + plan_hrrr(long_cycles["hrrr"], args.past_days, HRRR_FORECAST_HOURS)
     )
     print(f"Long runs: {long_cycles}", flush=True)
     store: Store = R2Store.from_environment() if args.r2 else LocalStore(LOCAL_OUT)

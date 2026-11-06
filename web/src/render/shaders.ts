@@ -94,6 +94,7 @@ layout(location = 0) in vec4 a_state;
 
 uniform mat4 u_matrix;
 uniform float u_pointSize;
+uniform float u_plain; // 1 makes particles plain white, for use over a colored layer
 
 out vec4 v_color;
 
@@ -117,7 +118,10 @@ void main() {
 
   float speed = a_state.w;
   float alpha = smoothstep(0.0, 0.6, a_state.z) * mix(0.28, 0.8, smoothstep(0.0, 10.0, speed));
-  v_color = vec4(ramp(speed) * alpha, alpha);
+  vec3 tint = mix(ramp(speed), vec3(0.96), u_plain);
+  // Plain particles sit on top of a colored layer, so they stay quieter.
+  alpha *= mix(1.0, 0.7, u_plain);
+  v_color = vec4(tint * alpha, alpha);
 }
 `;
 

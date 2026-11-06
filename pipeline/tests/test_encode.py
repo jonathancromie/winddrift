@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from winddrift.encode import DEFAULT_SCALE, decode_frame, encode_frame
 from winddrift.regrid import LatLonGrid, WindField
@@ -47,3 +48,29 @@ def test_grid_metadata_round_trips():
 def test_encoding_is_deterministic():
     field = make_field()
     assert encode_frame(field) == encode_frame(field)
+
+
+def test_scalar_round_trip_is_within_half_a_step_and_keeps_missing_cells():
+    from winddrift.encode import SCALAR_SCALE, decode_scalar_frame, encode_scalar_frame
+    from winddrift.regrid import ScalarField
+
+    grid = LatLonGrid(-130.0, 20.0, 0.05, 0.05, 120, 80)
+    values = np.random.default_rng(3).uniform(-60, 55, (80, 120))
+    values[5:9, 10:40] = np.nan
+    decoded = decode_scalar_frame(encode_scalar_frame(ScalarField(grid, values)))
+    assert np.array_equal(np.isnan(decoded.values), np.isnan(values))
+    valid = np.isfinite(values)
+    assert np.abs(decoded.values - values)[valid].max() <= SCALAR_SCALE / 2 + 1e-9
+    assert decoded.grid.nx == 120
+
+
+def test_wind_and_scalar_frames_cannot_be_confused():
+    from winddrift.encode import decode_scalar_frame, encode_scalar_frame
+    from winddrift.regrid import ScalarField
+
+    wind = make_field()
+    scalar = encode_scalar_frame(ScalarField(wind.grid, wind.u))
+    with pytest.raises(ValueError):
+        decode_frame(scalar)
+    with pytest.raises(ValueError):
+        decode_scalar_frame(encode_frame(wind))

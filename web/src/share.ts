@@ -6,6 +6,7 @@ export interface ShareState {
   timeMs?: number;
   camera?: { lon: number; lat: number; zoom: number };
   tracer?: { lon: number; lat: number; timeMs: number; preset: PresetName };
+  temperature?: boolean;
 }
 
 const VIEW_ID = /^[a-z0-9-]{1,40}$/;
@@ -50,6 +51,7 @@ export function parseShare(search: string): ShareState {
       preset: params.get("kind") === "pollen" ? "pollen" : "smoke",
     };
   }
+  if (params.get("layer") === "temperature") state.temperature = true;
   return state;
 }
 
@@ -77,6 +79,7 @@ export function buildShare(state: ShareState, existingSearch = ""): string {
     params.set("released", isoMinute(timeMs));
     params.set("kind", preset);
   }
+  if (state.temperature) params.set("layer", "temperature");
   const text = params.toString().replaceAll("%2C", ",").replaceAll("%3A", ":");
   return text ? `?${text}` : "";
 }

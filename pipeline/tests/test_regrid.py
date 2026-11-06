@@ -2,10 +2,12 @@ import numpy as np
 import pytest
 from pyproj import Proj
 
-from winddrift.fetch import RawWind
+from winddrift.fetch import RawTemperature, RawWind
 from winddrift.regrid import (
     LatLonGrid,
+    gfs_temperature_to_field,
     gfs_to_field,
+    hrrr_temperature_to_field,
     hrrr_to_field,
     lambert_rotation_angle,
     rotate_to_earth,
@@ -112,3 +114,23 @@ def test_gfs_is_flipped_to_south_first_and_rolled_to_minus_180():
     assert field.u[-1, 0] == pytest.approx(90)
     assert field.v[0, 0] == pytest.approx(180)  # lon -180 == 180
     assert field.v[0, 720] == pytest.approx(0)  # lon 0
+
+
+def test_gfs_temperature_is_flipped_rolled_and_in_celsius():
+    nx, ny = 1440, 721
+    lats = np.linspace(90, -90, ny)
+    kelvin = 273.15 + np.tile(lats[:, None], (1, nx)) / 3
+    kelvin[:, 720] += 1  # the column at longitude 180
+    field = gfs_temperature_to_field(RawTemperature(kelvin, nx, ny, {"j_scans_positively": False}))
+    assert field.values[0, 1] == pytest.approx(-30)
+    assert field.values[-1, 1] == pytest.approx(30)
+    assert field.values[360, 0] == pytest.approx(1)  # longitude -180 comes first
+
+
+def test_hrrr_temperature_is_resampled_in_celsius_and_empty_outside():
+    raw = make_lambert_raw(0.0, 0.0, relative=False)
+    temperature = RawTemperature(np.full((raw.ny, raw.nx), 300.0), raw.nx, raw.ny, raw.params)
+    target = LatLonGrid(-100.0, 35.0, 100.0, 1.0, 2, 1)  # one inside, one far outside
+    field = hrrr_temperature_to_field(temperature, target)
+    assert field.values[0, 0] == pytest.approx(26.85)
+    assert np.isnan(field.values[0, 1])

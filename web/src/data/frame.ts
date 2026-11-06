@@ -25,6 +25,69 @@ export interface DecodedFrame {
   v: Int16Array;
 }
 
+export interface DecodedScalarFrame {
+  grid: FrameGrid;
+  scale: number;
+  values: Int16Array;
+}
+
+/** Whether a downloaded frame holds one field, such as temperature, rather than wind. */
+export function isScalarFrame(buffer: ArrayBuffer): boolean {
+  return String.fromCharCode(...new Uint8Array(buffer, 0, 4)) === "WDS1";
+}
+
+function readGrid(view: DataView): FrameGrid {
+  return {
+    nx: view.getUint16(4, true),
+    ny: view.getUint16(6, true),
+    lon0: view.getFloat32(8, true),
+    lat0: view.getFloat32(12, true),
+    dlon: view.getFloat32(16, true),
+    dlat: view.getFloat32(20, true),
+  };
+}
+
+async function inflate(buffer: ArrayBuffer): Promise<Uint8Array> {
+  const payload = new Blob([new Uint8Array(buffer, HEADER_BYTES)]);
+  const stream = payload.stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+export async function decodeScalarFrame(buffer: ArrayBuffer): Promise<DecodedScalarFrame> {
+  if (!isScalarFrame(buffer)) throw new Error("Not a scalar frame");
+  const view = new DataView(buffer);
+  const grid = readGrid(view);
+  const shuffled = await inflate(buffer);
+  const count = grid.nx * grid.ny;
+  if (shuffled.length !== count * 2) {
+    throw new Error(`Frame payload is ${shuffled.length} bytes, expected ${count * 2}`);
+  }
+  const values = unshuffle(shuffled);
+  undeltaRows(values, grid.nx, grid.ny, 0);
+  return { grid, scale: view.getFloat32(24, true), values };
+}
+
+/** Half floats for an R16F texture. NODATA cells become 0, and the edge mask hides them. */
+export function scalarToHalfFloat(frame: DecodedScalarFrame): Uint16Array {
+  const table = new Uint16Array(65536);
+  for (let i = -32768; i < 32768; i++) {
+    table[i & 0xffff] = i === NODATA ? 0 : toHalfFloat(i * frame.scale);
+  }
+  const out = new Uint16Array(frame.values.length);
+  for (let i = 0; i < out.length; i++) out[i] = table[frame.values[i] & 0xffff];
+  return out;
+}
+
+/** Inverse of toHalfFloat. */
+export function fromHalfFloat(bits: number): number {
+  const sign = bits & 0x8000 ? -1 : 1;
+  const exponent = (bits >> 10) & 0x1f;
+  const mantissa = bits & 0x3ff;
+  if (exponent === 0) return (sign * mantissa) / 2 ** 24;
+  if (exponent === 31) return mantissa ? Number.NaN : sign * Infinity;
+  return sign * (1 + mantissa / 1024) * 2 ** (exponent - 15);
+}
+
 export async function decodeFrame(buffer: ArrayBuffer): Promise<DecodedFrame> {
   const view = new DataView(buffer);
   const magic = String.fromCharCode(...new Uint8Array(buffer, 0, 4));

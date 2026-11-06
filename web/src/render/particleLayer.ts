@@ -70,6 +70,7 @@ export class ParticleLayer implements CustomLayerInterface {
   private frame = 0;
   private lastTime = 0;
   private still = false;
+  private plain = false;
   private awakeUntil = 0;
 
   /** How many particles the device can sustain, separate from how many look good. */
@@ -89,6 +90,12 @@ export class ParticleLayer implements CustomLayerInterface {
 
   setWind(wind: WindTextures | null): void {
     this.wind = wind;
+    this.wake();
+  }
+
+  /** Draw particles in plain white, so they don't compete with a colored layer beneath. */
+  setPlain(plain: boolean): void {
+    this.plain = plain;
     this.wake();
   }
 
@@ -329,6 +336,7 @@ export class ParticleLayer implements CustomLayerInterface {
       args.defaultProjectionData.mainMatrix as Float32Array,
     );
     gl.uniform1f(this.particle.uniforms.u_pointSize, 1.2 * window.devicePixelRatio);
+    gl.uniform1f(this.particle.uniforms.u_plain, this.plain ? 1 : 0);
     gl.bindVertexArray(this.states[0].vao);
     gl.drawArrays(gl.POINTS, 0, this.stats.particles);
 

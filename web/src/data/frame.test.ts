@@ -1,6 +1,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { decodeFrame, edgeFadeMask, isGlobal, toHalfFloat, toHalfFloatRG, type DecodedFrame } from "./frame";
+import {
+  decodeFrame,
+  decodeScalarFrame,
+  edgeFadeMask,
+  fromHalfFloat,
+  isGlobal,
+  isScalarFrame,
+  scalarToHalfFloat,
+  toHalfFloat,
+  toHalfFloatRG,
+  type DecodedFrame,
+} from "./frame";
 
 function fixture(): ArrayBuffer {
   const bytes = readFileSync(new URL("./__fixtures__/small.wdf", import.meta.url));
@@ -127,5 +138,34 @@ describe("toHalfFloatRG", () => {
     expect(rg[16]).toBe(0); // NODATA
     expect(rg[17]).toBe(0);
     expect(fromHalf(rg[20])).toBeCloseTo(7, 2);
+  });
+});
+
+describe("scalar frames", () => {
+  it("reads a frame written by the Python encoder", async () => {
+    const bytes = readFileSync(new URL("./__fixtures__/temperature.wds", import.meta.url));
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    expect(isScalarFrame(buffer)).toBe(true);
+    const frame = await decodeScalarFrame(buffer);
+    expect(frame.grid.nx).toBe(4);
+    expect(frame.grid.ny).toBe(3);
+    expect(frame.scale).toBeCloseTo(0.1);
+    const celsius = Array.from(frame.values.subarray(0, 4), (x) => x * frame.scale);
+    [-40.5, 0, 12.3, 49.9].forEach((value, i) => expect(celsius[i]).toBeCloseTo(value, 3));
+    expect(frame.values[4]).toBe(-32768);
+    const half = scalarToHalfFloat(frame);
+    expect(fromHalfFloat(half[3])).toBeCloseTo(49.9, 1);
+    expect(half[4]).toBe(0);
+  });
+
+  it("won't read a wind frame as a scalar one, or the reverse", async () => {
+    await expect(decodeScalarFrame(fixture())).rejects.toThrow("Not a scalar frame");
+    expect(isScalarFrame(fixture())).toBe(false);
+  });
+});
+
+describe("fromHalfFloat", () => {
+  it.each([0, 1, -1, 0.5, 25.5, -40, 49.875])("reverses toHalfFloat for %d", (value) => {
+    expect(fromHalfFloat(toHalfFloat(value))).toBe(value);
   });
 });

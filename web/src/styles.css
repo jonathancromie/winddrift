@@ -178,6 +178,97 @@ body {
   background: rgb(255 255 255 / 8%);
 }
 
+#temperature {
+  width: 100%;
+  min-height: 30px;
+  margin-top: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#temperature[hidden] {
+  display: none;
+}
+
+#temperature:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+#temperature[aria-pressed="true"] {
+  background: rgb(255 255 255 / 16%);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.temperature-legend {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.temperature-legend[hidden] {
+  display: none;
+}
+
+.legend-scale {
+  flex: 1;
+  min-width: 0;
+}
+
+.legend-bar {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.legend-ticks {
+  position: relative;
+  height: 15px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.legend-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+#temperature-reading {
+  flex: none;
+  min-width: 42px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+#temperature-unit {
+  flex: none;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#temperature-unit:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+#temperature:focus-visible,
+#temperature-unit:focus-visible,
 #views:focus-visible,
 #share:focus-visible {
   outline: 2px solid var(--accent);

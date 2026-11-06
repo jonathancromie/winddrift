@@ -19,9 +19,12 @@ import struct
 
 import numpy as np
 
-from .regrid import LatLonGrid, WindField
+from .regrid import LatLonGrid, ScalarField, WindField
 
 MAGIC = b"WDF1"
+# The same layout with one field in place of U and V, such as temperature.
+SCALAR_MAGIC = b"WDS1"
+SCALAR_SCALE = 0.1
 HEADER = struct.Struct("<4sHH5f")
 NODATA = -32768
 DEFAULT_SCALE = 0.05
@@ -65,6 +68,22 @@ def encode_frame(field: WindField, scale: float = DEFAULT_SCALE, level: int = 9)
     v = delta_rows(quantize(field.v, scale))
     # mtime=0 keeps output byte-identical for identical input.
     return header + gzip.compress(shuffle(np.concatenate([u, v], axis=None)), level, mtime=0)
+
+
+def encode_scalar_frame(field: ScalarField, scale: float = SCALAR_SCALE, level: int = 9) -> bytes:
+    grid = field.grid
+    header = HEADER.pack(
+        SCALAR_MAGIC, grid.nx, grid.ny, grid.lon0, grid.lat0, grid.dlon, grid.dlat, scale
+    )
+    return header + gzip.compress(shuffle(delta_rows(quantize(field.values, scale))), level, mtime=0)
+
+
+def decode_scalar_frame(data: bytes) -> ScalarField:
+    magic, nx, ny, lon0, lat0, dlon, dlat, scale = HEADER.unpack_from(data)
+    if magic != SCALAR_MAGIC:
+        raise ValueError(f"not a scalar frame: {magic!r}")
+    values = undelta_rows(unshuffle(gzip.decompress(data[HEADER.size :])).reshape(ny, nx))
+    return ScalarField(LatLonGrid(lon0, lat0, dlon, dlat, nx, ny), _to_physical(values, scale))
 
 
 def decode_frame(data: bytes) -> WindField:

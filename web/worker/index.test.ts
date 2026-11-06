@@ -45,6 +45,8 @@ describe("keyForPath", () => {
     ["/data/views/index.json", "views/index.json"],
     ["/data/views/la-fires/manifest.json", "views/la-fires/manifest.json"],
     ["/data/views/la-fires/hrrr/2025010612/f000.wdf", "views/la-fires/hrrr/2025010612/f000.wdf"],
+    ["/data/temp/hrrr/2026110518/f000.wdf", "temp/hrrr/2026110518/f000.wdf"],
+    ["/data/views/sea-breeze-la/temp/gfs/2026071606/f000.wdf", "views/sea-breeze-la/temp/gfs/2026071606/f000.wdf"],
   ])("serves %s", (path, key) => {
     expect(keyForPath(path)).toBe(key);
   });
@@ -63,6 +65,8 @@ describe("keyForPath", () => {
     "/data/gfs/2026110518/f000.wdf/extra",
     "/data/manifest.json.bak",
     "/data/views/",
+    "/data/temp/secret.wdf",
+    "/data/temp/temp/gfs/2026110518/f000.wdf",
     "/data/views/secret.json",
     "/data/views/../manifest.json",
     "/data/views/a/b/manifest.json",

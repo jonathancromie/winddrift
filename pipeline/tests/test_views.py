@@ -6,7 +6,7 @@ import pytest
 
 from winddrift import build
 from winddrift.build import publish, stale_keys
-from winddrift.frames import plan_past_gfs, plan_past_hrrr
+from winddrift.frames import FrameSpec, plan_past_gfs, plan_past_hrrr, with_temperature
 from winddrift.fetch import RawWind
 from winddrift.regrid import hrrr_to_field
 from winddrift.store import LocalStore
@@ -188,3 +188,53 @@ def test_index_lists_every_view():
     document = index_document()
     assert [v["id"] for v in document["views"]] == [v.id for v in VIEWS]
     assert {v["group"] for v in document["views"]} == {"Events", "Sea breeze loops"}
+
+
+def test_temperature_frames_get_their_own_paths_and_manifest_series():
+    wind = FrameSpec("hrrr", START, 0, "views/x/")
+    temp = with_temperature([wind])[1]
+    assert wind.relative_path == "views/x/hrrr/2025010612/f000.wdf"
+    assert temp.relative_path == "views/x/temp/hrrr/2025010612/f000.wdf"
+    assert wind.series == "hrrr"
+    assert temp.series == "hrrr-temp"
+    assert temp.valid == wind.valid
+
+
+def test_only_sea_breeze_loops_carry_temperature_for_now():
+    for view in VIEWS:
+        has_temperature = any(s.variable == "temp" for s in view.specs())
+        assert has_temperature == view.close_up
+
+
+def test_manifest_lists_temperature_separately(tmp_path, no_downloads):
+    store = LocalStore(tmp_path)
+    view = next(v for v in VIEWS if v.id == "sea-breeze-la")
+    publish_view(view, store, datetime(2026, 11, 6), 1)
+    models = json.loads(store.get("views/sea-breeze-la/manifest.json"))["models"]
+    assert set(models) == {"gfs", "hrrr", "gfs-temp", "hrrr-temp"}
+    assert len(models["hrrr-temp"]["frames"]) == 25
+    assert models["hrrr-temp"]["frames"][0]["url"].startswith("views/sea-breeze-la/temp/hrrr/")
+
+
+def test_losing_all_temperature_does_not_take_down_the_wind(tmp_path, monkeypatch, no_downloads):
+    good = build.encode_spec
+
+    def no_temperature(spec, grib_dir):
+        if spec.variable == "temp":
+            raise ConnectionError("refused")
+        return good(spec, grib_dir)
+
+    monkeypatch.setattr(build, "encode_spec", no_temperature)
+    monkeypatch.setattr(build, "RETRY_DELAYS_SECONDS", (0,))
+    store = LocalStore(tmp_path)
+    cycle = datetime(2026, 11, 6)
+    specs = with_temperature(plan_past_hrrr(cycle, cycle) + plan_past_gfs(cycle, cycle))
+    failures = publish(specs, {"gfs": cycle, "hrrr": cycle}, store, tmp_path, cycle, 1)
+    assert failures == 2
+    assert set(json.loads(store.get("manifest.json"))["models"]) == {"gfs", "hrrr"}
+
+
+def test_rolling_cleanup_also_covers_temperature_frames():
+    assert stale_keys({"temp/gfs/1/f000.wdf", "views/a/temp/gfs/1/f000.wdf"}, set(), set()) == [
+        "temp/gfs/1/f000.wdf"
+    ]

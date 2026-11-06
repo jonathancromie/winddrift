@@ -19,6 +19,7 @@
           </select>
           <button id="share" type="button">Share</button>
         </div>
+        <button id="temperature" type="button" aria-pressed="false" hidden>Temperature</button>
         <p id="view-summary" hidden></p>
       </header>
       <section id="tracer" class="tracer" aria-label="Tracer" data-active="false">
@@ -52,6 +53,14 @@
           <span id="data-age"></span>
           <span id="range-end"></span>
         </div>
+      </div>
+      <div id="temperature-legend" class="temperature-legend" hidden>
+        <div class="legend-scale">
+          <div id="legend-bar" class="legend-bar"></div>
+          <div id="legend-ticks" class="legend-ticks" aria-hidden="true"></div>
+        </div>
+        <output id="temperature-reading" aria-label="Temperature at the cursor"></output>
+        <button id="temperature-unit" type="button"></button>
       </div>
       <div class="timeline-controls">
         <div class="transport">

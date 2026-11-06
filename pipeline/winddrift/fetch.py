@@ -1,4 +1,4 @@
-"""Download only the 10 m U/V messages from NOAA GRIB2 files using byte ranges."""
+"""Download only the messages we use from NOAA GRIB2 files, using byte ranges."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +14,7 @@ from eccodes import (
 from herbie import Herbie
 
 WIND_10M_SEARCH = r":[UV]GRD:10 m above ground"
+TEMPERATURE_2M_SEARCH = r":TMP:2 m above ground"
 
 
 @dataclass
@@ -28,8 +29,20 @@ class RawWind:
     params: dict
 
 
-def fetch_subset(model: str, cycle: datetime, fxx: int, save_dir: Path) -> Path:
-    """Fetch the U/V subset for one forecast hour and return the local file path."""
+@dataclass
+class RawTemperature:
+    """2 m temperature in kelvin on the source grid, with its GRIB metadata."""
+
+    values: np.ndarray
+    nx: int
+    ny: int
+    params: dict
+
+
+def fetch_subset(
+    model: str, cycle: datetime, fxx: int, save_dir: Path, search: str = WIND_10M_SEARCH
+) -> Path:
+    """Fetch the matching messages for one forecast hour and return the local file path."""
     product = "sfc" if model == "hrrr" else "pgrb2.0p25"
     herbie = Herbie(
         cycle.strftime("%Y-%m-%d %H:%M"),
@@ -40,11 +53,32 @@ def fetch_subset(model: str, cycle: datetime, fxx: int, save_dir: Path) -> Path:
         priority=["aws"],
         verbose=False,
     )
-    return Path(herbie.download(WIND_10M_SEARCH, verbose=False))
+    return Path(herbie.download(search, verbose=False))
 
 
 def read_wind(path: Path) -> RawWind:
     """Read U and V from a two-message GRIB subset, in south-to-north GRIB scan order."""
+    fields, meta = _read_messages(path)
+    if "10u" not in fields or "10v" not in fields:
+        raise ValueError(f"{path} lacks 10 m U/V, found {sorted(fields)}")
+    return RawWind(
+        u=fields["10u"],
+        v=fields["10v"],
+        nx=meta["nx"],
+        ny=meta["ny"],
+        u_v_relative_to_grid=meta["relative"],
+        params=meta,
+    )
+
+
+def read_temperature(path: Path) -> RawTemperature:
+    fields, meta = _read_messages(path)
+    if "2t" not in fields:
+        raise ValueError(f"{path} lacks 2 m temperature, found {sorted(fields)}")
+    return RawTemperature(fields["2t"], meta["nx"], meta["ny"], meta)
+
+
+def _read_messages(path: Path) -> tuple[dict[str, np.ndarray], dict]:
     fields: dict[str, np.ndarray] = {}
     meta: dict = {}
     with open(path, "rb") as handle:
@@ -75,16 +109,7 @@ def read_wind(path: Path) -> RawWind:
                     )
             finally:
                 codes_release(gid)
-    if "10u" not in fields or "10v" not in fields:
-        raise ValueError(f"{path} lacks 10 m U/V, found {sorted(fields)}")
-    return RawWind(
-        u=fields["10u"],
-        v=fields["10v"],
-        nx=meta["nx"],
-        ny=meta["ny"],
-        u_v_relative_to_grid=meta["relative"],
-        params=meta,
-    )
+    return fields, meta
 
 
 def _has_ij(gid) -> bool:

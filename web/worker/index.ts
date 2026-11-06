@@ -27,7 +27,7 @@ interface WorkerContext {
 }
 
 /** Only keys the pipeline writes, so nothing else in the bucket can be reached. */
-const FRAME_KEY = /^(views\/[a-z0-9-]{1,40}\/)?(gfs|hrrr)\/\d{10}\/f\d{3}\.wdf$/;
+const FRAME_KEY = /^(views\/[a-z0-9-]{1,40}\/)?(temp\/)?(gfs|hrrr)\/\d{10}\/f\d{3}\.wdf$/;
 const LISTING_KEY = /^(manifest\.json|views\/index\.json|views\/[a-z0-9-]{1,40}\/manifest\.json)$/;
 const DATA_PREFIX = "/data/";
 

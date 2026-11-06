@@ -4,7 +4,7 @@ Animated wind particles over a map, with a timeline running from recent days thr
 
 **Live at https://winddrift.joncromie.workers.dev**
 
-HRRR wind over the US is blended into global GFS, with fresh data four times a day. Click the map to release a smoke or pollen tracer.
+HRRR wind over the US is blended into global GFS, with fresh data four times a day. Click the map to release a smoke or pollen tracer, or turn on the temperature layer.
 
 ## Run it
 

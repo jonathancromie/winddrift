@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .build import GRIB_DIR, LOCAL_OUT, publish
-from .frames import FrameSpec, plan_past_gfs, plan_past_hrrr
+from .frames import FrameSpec, plan_past_gfs, plan_past_hrrr, with_temperature
 from .regrid import LatLonGrid
 from .store import MANIFEST_CACHE, LocalStore, R2Store, Store
 
@@ -60,9 +60,11 @@ class View:
 
     def specs(self) -> list[FrameSpec]:
         prefix = f"views/{self.id}/"
-        return plan_past_gfs(self.start, self.end, prefix) + plan_past_hrrr(
+        specs = plan_past_gfs(self.start, self.end, prefix) + plan_past_hrrr(
             self.start, self.end, prefix, self.grid
         )
+        # Sea breezes are driven by land heating faster than water, so loops show temperature too.
+        return with_temperature(specs) if self.close_up else specs
 
     def manifest_fields(self) -> dict:
         fields = {

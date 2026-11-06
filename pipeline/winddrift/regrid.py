@@ -6,7 +6,7 @@ import numpy as np
 from pyproj import Proj
 from scipy.ndimage import map_coordinates
 
-from .fetch import RawWind
+from .fetch import RawTemperature, RawWind
 
 
 @dataclass
@@ -33,6 +33,14 @@ class WindField:
     v: np.ndarray
 
 
+@dataclass
+class ScalarField:
+    grid: LatLonGrid
+    values: np.ndarray
+
+
+KELVIN = 273.15
+
 # Covers HRRR's whole domain at about 5 km. The curved domain leaves the corners empty.
 HRRR_GRID = LatLonGrid(-134.0, 21.0, 0.05, 0.05, 1480, 640)
 
@@ -47,6 +55,36 @@ def gfs_to_field(raw: RawWind) -> WindField:
     v = np.roll(v, shift, axis=1)
     grid = LatLonGrid(-180.0, -90.0, 0.25, 0.25, raw.nx, raw.ny)
     return WindField(grid, u, v)
+
+
+def gfs_temperature_to_field(raw: RawTemperature) -> "ScalarField":
+    """Same layout change as wind, converted to Celsius."""
+    values = raw.values
+    if not raw.params["j_scans_positively"]:
+        values = values[::-1]
+    grid = LatLonGrid(-180.0, -90.0, 0.25, 0.25, raw.nx, raw.ny)
+    return ScalarField(grid, np.roll(values, raw.nx // 2, axis=1) - KELVIN)
+
+
+def hrrr_temperature_to_field(raw: RawTemperature, target: LatLonGrid) -> "ScalarField":
+    """Resample Lambert HRRR temperature to `target`, in Celsius. Outside the domain is NaN."""
+    params = raw.params
+    if not params["j_scans_positively"]:
+        raise ValueError("expected HRRR rows to run south to north")
+    proj = Proj(
+        proj="lcc",
+        lat_1=params["latin1"],
+        lat_2=params["latin2"],
+        lat_0=params["lad"],
+        lon_0=params["lov"],
+        R=params["radius"],
+    )
+    x_first, y_first = proj(params["lon_first"], params["lat_first"])
+    lons, lats = target.axes()
+    x, y = proj(*np.meshgrid(lons, lats))
+    coords = np.stack([(y - y_first) / params["dy"], (x - x_first) / params["dx"]])
+    values = map_coordinates(raw.values, coords, order=1, mode="constant", cval=np.nan)
+    return ScalarField(target, values - KELVIN)
 
 
 def lambert_rotation_angle(lon: np.ndarray, lov: float, latin: float) -> np.ndarray:

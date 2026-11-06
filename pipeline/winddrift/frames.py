@@ -4,7 +4,7 @@ The past comes from the short-range start of each older run, which is the closes
 model gets to what actually happened. The future comes from one recent long run.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from .regrid import LatLonGrid
@@ -19,6 +19,12 @@ class FrameSpec:
     prefix: str = ""
     # A finer regional grid than the default, used by close-up views.
     grid: LatLonGrid | None = field(default=None, compare=False)
+    variable: str = "wind"
+
+    @property
+    def series(self) -> str:
+        """The name this frame's sequence goes by in a manifest."""
+        return self.model if self.variable == "wind" else f"{self.model}-{self.variable}"
 
     @property
     def valid(self) -> datetime:
@@ -26,7 +32,13 @@ class FrameSpec:
 
     @property
     def relative_path(self) -> str:
-        return f"{self.prefix}{self.model}/{self.cycle:%Y%m%d%H}/f{self.fxx:03d}.wdf"
+        folder = "" if self.variable == "wind" else f"{self.variable}/"
+        return f"{self.prefix}{folder}{self.model}/{self.cycle:%Y%m%d%H}/f{self.fxx:03d}.wdf"
+
+
+def with_temperature(specs: list[FrameSpec]) -> list[FrameSpec]:
+    """The same frames again as temperature, for the optional temperature layer."""
+    return specs + [replace(spec, variable="temp") for spec in specs]
 
 
 def plan_past_hrrr(
