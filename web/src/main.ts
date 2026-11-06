@@ -5,8 +5,9 @@ import "./styles.css";
 import type { FrameGrid } from "./data/frame";
 import type { WorkerResponse } from "./data/frame.worker";
 import { FrameStore, type FrameLoader } from "./data/frameStore";
-import { coarsen, nestWeight, prepareFrames, type Manifest, type TimedFrame } from "./data/manifest";
+import { coarsen, NEST_FADE_MS, nestWeight, prepareFrames, type Manifest, type TimedFrame } from "./data/manifest";
 import { ParticleLayer, type WindTextures } from "./render/particleLayer";
+import { TracerController } from "./tracer/controller";
 import {
   advance,
   framesToRequest,
@@ -26,7 +27,6 @@ const TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{
 const TEXTURE_CAPACITY = 16;
 const CSS_PIXELS_PER_PARTICLE = 30;
 const LONG_STEP_MS = 3 * HOUR_MS;
-const NEST_FADE_MS = 3 * HOUR_MS;
 const NOW_REFRESH_MS = 60 * 1000;
 const PLAY_ICON = "M4 2.5v11l9-5.5z";
 const PAUSE_ICON = "M4 2.5h3v11H4zM9 2.5h3v11H9z";
@@ -147,6 +147,9 @@ async function start(): Promise<void> {
   element("range-start").textContent = shortDate.format(firstMs);
   element("range-end").textContent = shortDate.format(lastMs);
 
+  const tracer = new TracerController(map, DATA_URL, baseFrames, nestFrames, lastMs, (ms) => fullDate.format(ms));
+  tracer.addLayers(firstSymbol);
+
   const clamp = (timeMs: number) => Math.min(Math.max(timeMs, firstMs), lastMs);
   let timeMs = clamp(Date.now());
   let playing = false;
@@ -226,6 +229,7 @@ async function start(): Promise<void> {
 
     const { wind, ready, nested } = currentWind();
     if (wind) layer.setWind(wind);
+    tracer.setTime(timeMs);
     updateStatus(!ready);
 
     slider.value = String(timeMs);
@@ -307,7 +311,7 @@ async function start(): Promise<void> {
       const fps = 1000 / layer.stats.frameMs;
       stats.textContent = `${fps.toFixed(0)} fps · ${layer.stats.particles.toLocaleString()} particles`;
     }, 500);
-    Object.assign(window, { winddrift: { map, layer, baseStore, nestStore, currentWind, baseFrames, nestFrames } });
+    Object.assign(window, { winddrift: { map, layer, tracer, baseStore, nestStore, currentWind, baseFrames, nestFrames } });
   }
 
   applyTime();

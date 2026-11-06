@@ -15,6 +15,9 @@ export interface TimedFrame extends ManifestFrame {
   index: number;
 }
 
+/** How long a regional model takes to fade in and out at the ends of its time range. */
+export const NEST_FADE_MS = 3 * 3600 * 1000;
+
 export interface FramePair {
   a: number;
   b: number;

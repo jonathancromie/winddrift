@@ -1,13 +1,10 @@
-import { decodeFrame, edgeFadeMask, isGlobal, toHalfFloatRG, type FrameGrid } from "./frame";
+import { decodeFrame, EDGE_FADE_CELLS, edgeFadeMask, isGlobal, toHalfFloatRG, type FrameGrid } from "./frame";
 
 export type WorkerRequest = { type: "load"; url: string } | { type: "cancel"; url: string };
 
 export type WorkerResponse =
   | { type: "loaded"; url: string; grid: FrameGrid; data: Uint16Array; mask?: Uint8Array }
   | { type: "failed"; url: string; message: string };
-
-/** About 1.5 degrees on the HRRR grid: wide enough to hide the seam with the global model. */
-const EDGE_FADE_CELLS = 30;
 
 const inFlight = new Map<string, AbortController>();
 let maskSent = false;

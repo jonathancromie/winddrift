@@ -29,10 +29,107 @@ body {
   inset: 0;
 }
 
-.brand {
+.side {
   position: fixed;
   top: 16px;
   left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  width: min(290px, calc(100vw - 72px));
+}
+
+.tracer {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.tracer p {
+  margin: 6px 0 0;
+}
+
+#tracer-title {
+  font-weight: 600;
+}
+
+#tracer-detail {
+  font-variant-numeric: tabular-nums;
+}
+
+#tracer-hint,
+.tracer-note {
+  color: var(--muted);
+}
+
+.tracer-note {
+  font-size: 12px;
+}
+
+.tracer-row {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tracer-presets {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.tracer-presets button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tracer-presets button:hover,
+#tracer-clear:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.tracer-presets button[aria-pressed="true"] {
+  background: rgb(255 255 255 / 16%);
+  color: var(--text);
+  font-weight: 600;
+}
+
+#tracer-clear {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+#tracer-clear[hidden] {
+  display: none;
+}
+
+.tracer-presets button:focus-visible,
+#tracer-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.brand {
+  width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -323,10 +420,6 @@ body {
 
 /* The map credits wrap on narrow screens, and they must stay readable. */
 @media (max-width: 640px) {
-  .brand {
-    max-width: calc(100vw - 72px);
-  }
-
   .timeline {
     right: 8px;
     bottom: 76px;
@@ -347,6 +440,27 @@ body {
   #now {
     min-height: 38px;
     padding: 0 10px;
+  }
+}
+
+/* Landscape phones: there's no room to stack the panels, so they sit side by side. */
+@media (max-height: 500px) {
+  .side {
+    top: 8px;
+    left: 8px;
+  }
+
+  .timeline {
+    right: 8px;
+    bottom: 44px;
+    left: auto;
+    width: min(calc(100vw - 314px), 560px);
+    margin: 0;
+    padding: 8px;
+  }
+
+  .timeline-controls {
+    gap: 4px;
   }
 }
 

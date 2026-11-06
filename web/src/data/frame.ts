@@ -4,7 +4,9 @@
  */
 
 const HEADER_BYTES = 28;
-const NODATA = -32768;
+export const NODATA = -32768;
+/** About 1.5 degrees on the HRRR grid: wide enough to hide the seam with the global model. */
+export const EDGE_FADE_CELLS = 30;
 
 export interface FrameGrid {
   nx: number;

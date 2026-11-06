@@ -10,6 +10,7 @@
     "maplibre-gl": "^6.16.0"
   },
   "devDependencies": {
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vite": "^7.3.7",

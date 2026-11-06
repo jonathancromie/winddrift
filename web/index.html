@@ -9,10 +9,22 @@
   </head>
   <body>
     <div id="map"></div>
-    <header class="brand">
-      <h1>WindDrift</h1>
-      <p id="source">10 m wind</p>
-    </header>
+    <div class="side">
+      <header class="brand">
+        <h1>WindDrift</h1>
+        <p id="source">10 m wind</p>
+      </header>
+      <section id="tracer" class="tracer" aria-label="Tracer" data-active="false">
+        <div class="tracer-row">
+          <div id="tracer-presets" class="tracer-presets" role="group" aria-label="What to release"></div>
+          <button id="tracer-clear" type="button" hidden>Clear</button>
+        </div>
+        <p id="tracer-hint">Click the map to release it at the time shown, then press play.</p>
+        <p id="tracer-title" hidden></p>
+        <p id="tracer-detail" aria-live="polite" hidden></p>
+        <p class="tracer-note">An illustration from 10 m wind only, with no vertical motion. Don't use it for safety decisions.</p>
+      </section>
+    </div>
     <div id="stats" hidden></div>
     <div id="notice" role="alert" hidden></div>
     <section class="timeline" aria-label="Time controls">
